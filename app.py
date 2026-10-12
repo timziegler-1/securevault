@@ -71,21 +71,73 @@ def index():
     return render_template("index.html", roles=list(ROLES), expires=EXPIRES)
 
 
+def clean_prefix(raw):
+    """Macht aus 'a//b/' oder '/a/b' den Ordnerpfad 'a/b/' ('' = oberste Ebene)."""
+    parts = [p.strip() for p in (raw or "").replace("\\", "/").split("/")]
+    parts = [p for p in parts if p]
+    if any(p in (".", "..") for p in parts):
+        raise ValueError("Ungueltiger Ordnerpfad")
+    return "/".join(parts) + "/" if parts else ""
+
+
+def presigned_put(s3, bucket, key, data, content_type):
+    """Laedt mit einer Presigned URL hoch (gleich wie curl -X PUT -T)."""
+    url = s3.generate_presigned_url(
+        "put_object", Params={"Bucket": bucket, "Key": key}, ExpiresIn=EXPIRES
+    )
+    req = urllib.request.Request(
+        url, data=data, method="PUT", headers={"Content-Type": content_type}
+    )
+    try:
+        with urllib.request.urlopen(req) as r:
+            return {"ok": True, "key": key, "status": r.status, "url": url, "expires": EXPIRES}
+    except urllib.error.HTTPError as e:
+        return {"ok": False, "key": key, "status": e.code, "url": url, **b2_error(e.read())}
+
+
+def presigned_delete(s3, bucket, key):
+    url = s3.generate_presigned_url(
+        "delete_object", Params={"Bucket": bucket, "Key": key}, ExpiresIn=EXPIRES
+    )
+    req = urllib.request.Request(url, method="DELETE")
+    try:
+        with urllib.request.urlopen(req) as r:
+            return {"ok": True, "key": key, "status": r.status}
+    except urllib.error.HTTPError as e:
+        return {"ok": False, "key": key, "status": e.code, **b2_error(e.read())}
+
+
 @app.route("/api/files")
 def list_files():
     role = get_role()
     if not role:
         return jsonify(error="Unbekannte Rolle"), 400
-    s3, bucket = client_for(role)
     try:
-        resp = s3.list_objects_v2(Bucket=bucket)
+        prefix = clean_prefix(request.args.get("prefix"))
+    except ValueError as e:
+        return jsonify(error=str(e)), 400
+    s3, bucket = client_for(role)
+    folders, files = [], []
+    try:
+        # Delimiter="/" fasst alles unterhalb eines Unterordners zu einem Ordner zusammen
+        pages = s3.get_paginator("list_objects_v2").paginate(
+            Bucket=bucket, Prefix=prefix, Delimiter="/"
+        )
+        for page in pages:
+            for p in page.get("CommonPrefixes", []):
+                folders.append({"prefix": p["Prefix"], "name": p["Prefix"][len(prefix):-1]})
+            for o in page.get("Contents", []):
+                if o["Key"] == prefix:  # Platzhalter des Ordners selbst
+                    continue
+                files.append({
+                    "key": o["Key"],
+                    "name": o["Key"][len(prefix):],
+                    "size": o["Size"],
+                    "modified": o["LastModified"].isoformat(),
+                })
     except Exception as e:  # z. B. AccessDenied
         return jsonify(error=str(e)), 403
-    files = [
-        {"key": o["Key"], "size": o["Size"], "modified": o["LastModified"].isoformat()}
-        for o in resp.get("Contents", [])
-    ]
-    return jsonify(bucket=bucket, files=files)
+    return jsonify(bucket=bucket, prefix=prefix, folders=folders, files=files)
 
 
 @app.route("/api/upload", methods=["POST"])
@@ -94,23 +146,33 @@ def upload():
     f = request.files.get("file")
     if not role or not f or not f.filename:
         return jsonify(error="Rolle oder Datei fehlt"), 400
-    s3, bucket = client_for(role)
-    key = os.path.basename(f.filename)
-    url = s3.generate_presigned_url(
-        "put_object", Params={"Bucket": bucket, "Key": key}, ExpiresIn=EXPIRES
-    )
-    # Der Server laedt die Datei mit der Presigned URL hoch (gleich wie curl -X PUT -T).
-    req = urllib.request.Request(
-        url,
-        data=f.read(),
-        method="PUT",
-        headers={"Content-Type": f.mimetype or "application/octet-stream"},
-    )
     try:
-        with urllib.request.urlopen(req) as r:
-            return jsonify(ok=True, key=key, status=r.status, url=url, expires=EXPIRES)
-    except urllib.error.HTTPError as e:
-        return jsonify(ok=False, key=key, status=e.code, url=url, **b2_error(e.read())), 200
+        prefix = clean_prefix(request.values.get("prefix"))
+    except ValueError as e:
+        return jsonify(error=str(e)), 400
+    s3, bucket = client_for(role)
+    key = prefix + os.path.basename(f.filename)
+    result = presigned_put(s3, bucket, key, f.read(), f.mimetype or "application/octet-stream")
+    return jsonify(**result)
+
+
+@app.route("/api/mkdir", methods=["POST"])
+def mkdir():
+    role = get_role()
+    name = (request.values.get("name") or "").strip()
+    if not role or not name:
+        return jsonify(error="Rolle oder Ordnername fehlt"), 400
+    if "/" in name or "\\" in name or name in (".", ".."):
+        return jsonify(error="Der Ordnername darf kein / oder \\ enthalten"), 400
+    try:
+        prefix = clean_prefix(request.values.get("prefix"))
+    except ValueError as e:
+        return jsonify(error=str(e)), 400
+    s3, bucket = client_for(role)
+    # B2 kennt keine echten Ordner: ein leeres Objekt "name/" dient als Platzhalter
+    result = presigned_put(s3, bucket, prefix + name + "/", b"", "application/x-directory")
+    result.pop("url", None)
+    return jsonify(**result)
 
 
 @app.route("/api/download-url")
@@ -133,15 +195,25 @@ def delete():
     if not role or not key:
         return jsonify(error="Rolle oder Dateiname fehlt"), 400
     s3, bucket = client_for(role)
-    url = s3.generate_presigned_url(
-        "delete_object", Params={"Bucket": bucket, "Key": key}, ExpiresIn=EXPIRES
-    )
-    req = urllib.request.Request(url, method="DELETE")
+    if not key.endswith("/"):
+        return jsonify(**presigned_delete(s3, bucket, key))
+
+    # Ordner: alles darunter loeschen, Platzhalter zuletzt
     try:
-        with urllib.request.urlopen(req) as r:
-            return jsonify(ok=True, key=key, status=r.status)
-    except urllib.error.HTTPError as e:
-        return jsonify(ok=False, key=key, status=e.code, **b2_error(e.read())), 200
+        prefix = clean_prefix(key)
+    except ValueError as e:
+        return jsonify(error=str(e)), 400
+    keys = []
+    for page in s3.get_paginator("list_objects_v2").paginate(Bucket=bucket, Prefix=prefix):
+        keys += [o["Key"] for o in page.get("Contents", [])]
+    keys.sort(key=lambda k: (k == prefix, k))
+    deleted = 0
+    for k in keys:
+        result = presigned_delete(s3, bucket, k)
+        if not result["ok"]:  # z. B. AccessDenied beim Viewer: sofort abbrechen
+            return jsonify(**result, deleted=deleted)
+        deleted += 1
+    return jsonify(ok=True, key=prefix, status=204, deleted=deleted)
 
 
 if __name__ == "__main__":

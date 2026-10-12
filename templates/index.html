@@ -81,6 +81,16 @@
   td.name > div { display: flex; align-items: center; gap: 8px; word-break: break-all; }
   .ext { flex: none; font-size: 10px; font-weight: 700; text-transform: uppercase; border-radius: 4px;
          padding: 2px 5px; background: var(--code); color: var(--muted); min-width: 34px; text-align: center; }
+  .ext.folder { background: var(--accent-soft); color: var(--accent); }
+  tr.folder td.name span:last-child { font-weight: 600; cursor: pointer; }
+  tr.folder td.name span:last-child:hover { text-decoration: underline; }
+  .crumbs { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; font-size: 14px; margin-top: 10px; }
+  .crumbs a { color: var(--ink); text-decoration: none; padding: 2px 6px; border-radius: 6px; cursor: pointer; }
+  .crumbs a:hover { background: var(--code); }
+  .crumbs a.current { font-weight: 700; cursor: default; background: transparent; }
+  .crumbs .sep { color: var(--muted); }
+  #mkdirRow { margin-top: 12px; }
+  #mkdirRow[hidden] { display: none; }
   td.actions { text-align: right; white-space: nowrap; }
   td.actions button { padding: 4px 10px; font-size: 13px; margin-left: 4px; }
   .empty { color: var(--muted); padding: 14px 0; text-align: center; }
@@ -137,8 +147,8 @@
 
 <main>
   <div class="stats">
-    <div class="stat"><b id="statCount">–</b><span>Dateien im Bucket</span></div>
-    <div class="stat"><b id="statSize">–</b><span>Gesamtgrösse</span></div>
+    <div class="stat"><b id="statCount">–</b><span>Einträge in diesem Ordner</span></div>
+    <div class="stat"><b id="statSize">–</b><span>Grösse der Dateien hier</span></div>
     <div class="stat"><b>{{ expires }} s</b><span>Gültigkeit Presigned URL</span></div>
   </div>
 
@@ -158,11 +168,20 @@
 
   <section class="card">
     <div class="row spread">
-      <h2 style="margin:0">Dateien im Bucket <span id="bucket" style="color:var(--muted);font-weight:400"></span></h2>
-      <button class="ghost" id="refreshBtn">Aktualisieren</button>
+      <h2 style="margin:0">Dateien im Bucket</h2>
+      <div class="row">
+        <button class="ghost" id="mkdirBtn">+ Neuer Ordner</button>
+        <button class="ghost" id="refreshBtn">Aktualisieren</button>
+      </div>
     </div>
+    <nav class="crumbs" id="crumbs" aria-label="Ordnerpfad"></nav>
+    <form class="row" id="mkdirRow" hidden>
+      <input class="search" id="mkdirName" placeholder="Name des neuen Ordners" maxlength="100" autocomplete="off">
+      <button type="submit">Erstellen</button>
+      <button type="button" class="ghost" id="mkdirCancel">Abbrechen</button>
+    </form>
     <div class="row" style="margin-top:12px">
-      <input class="search" id="search" type="search" placeholder="Dateien suchen …">
+      <input class="search" id="search" type="search" placeholder="In diesem Ordner suchen …">
     </div>
     <table>
       <thead><tr>
@@ -203,7 +222,7 @@ const $ = (id) => document.getElementById(id);
 const ROLES = [...document.querySelectorAll("#roleSwitch button")].map(b => b.dataset.role);
 let currentRole = localStorageGet("sv-role");
 if (!ROLES.includes(currentRole)) currentRole = ROLES[0];
-let files = [], sortKey = "modified", sortDir = -1;
+let files = [], folders = [], prefix = "", bucketName = "", loadId = 0, sortKey = "modified", sortDir = -1;
 let lastUrl = null, expiresAt = 0, linkSeconds = 300, timerId = null, toastId = null;
 
 function localStorageGet(k) { try { return localStorage.getItem(k); } catch { return null; } }
@@ -232,10 +251,41 @@ function setRole(r) {
   localStorageSet("sv-role", r);
   document.querySelectorAll("#roleSwitch button").forEach(b => b.classList.toggle("active", b.dataset.role === r));
   $("rights").textContent = r === "admin" ? "Lesen + Schreiben" : r === "viewer" ? "Nur Lesen" : "aus .env";
-  $("dropHint").textContent = r === "viewer"
-    ? "Viewer hat nur Leserechte – B2 wird den Upload ablehnen"
-    : "Mehrere Dateien möglich, max. 50 MB pro Datei";
   $("drop").classList.toggle("locked", r === "viewer");
+  $("mkdirBtn").hidden = r === "viewer";  // Viewer darf keine Ordner anlegen
+  if (r === "viewer") $("mkdirRow").hidden = true;
+  updateDropHint();
+}
+
+function updateDropHint() {
+  const where = prefix ? `Ziel: /${prefix}` : "Ziel: oberste Ebene";
+  $("dropHint").textContent = role() === "viewer"
+    ? "Viewer hat nur Leserechte – B2 wird den Upload ablehnen"
+    : `Mehrere Dateien möglich, max. 50 MB pro Datei · ${where}`;
+}
+
+function openFolder(p) {
+  prefix = p;
+  $("search").value = "";
+  $("mkdirRow").hidden = true;
+  updateDropHint();
+  loadFiles();
+}
+
+function renderCrumbs() {
+  const nav = $("crumbs");
+  nav.innerHTML = "";
+  const parts = prefix ? prefix.slice(0, -1).split("/") : [];
+  const items = [{ label: bucketName || "Bucket", p: "" }];
+  parts.forEach((name, i) => items.push({ label: name, p: parts.slice(0, i + 1).join("/") + "/" }));
+  items.forEach((it, i) => {
+    if (i) { const s = document.createElement("span"); s.className = "sep"; s.textContent = "›"; nav.append(s); }
+    const a = document.createElement("a");
+    a.textContent = i ? it.label : "🗄 " + it.label;
+    if (i === items.length - 1) a.className = "current";
+    else a.onclick = () => openFolder(it.p);
+    nav.append(a);
+  });
 }
 
 function fmtSize(n) {
@@ -252,11 +302,14 @@ function ext(name) {
 
 async function loadFiles() {
   try {
-    const r = await fetch("/api/files?role=" + encodeURIComponent(role()));
+    const id = ++loadId;
+    const r = await fetch(`/api/files?role=${encodeURIComponent(role())}&prefix=${encodeURIComponent(prefix)}`);
     const data = await r.json();
-    if (!r.ok) { log("Dateiliste nicht lesbar: " + data.error, "err"); files = []; render(); return; }
-    $("bucket").textContent = "(" + data.bucket + ")";
+    if (id !== loadId) return;  // inzwischen wurde ein anderer Ordner geoeffnet
+    if (!r.ok) { log("Dateiliste nicht lesbar: " + data.error, "err"); files = []; folders = []; render(); return; }
+    bucketName = data.bucket;
     files = data.files;
+    folders = data.folders;
     render();
   } catch (e) {
     log("Server nicht erreichbar: " + e.message, "err");
@@ -264,12 +317,16 @@ async function loadFiles() {
 }
 
 function render() {
+  renderCrumbs();
   const q = $("search").value.trim().toLowerCase();
-  const list = files.filter(f => f.key.toLowerCase().includes(q)).sort((a, b) => {
-    const x = a[sortKey], y = b[sortKey];
+  const key = sortKey === "key" ? "name" : sortKey;
+  const list = files.filter(f => f.name.toLowerCase().includes(q)).sort((a, b) => {
+    const x = a[key], y = b[key];
     return (x < y ? -1 : x > y ? 1 : 0) * sortDir;
   });
-  $("statCount").textContent = files.length;
+  const dirs = folders.filter(d => d.name.toLowerCase().includes(q))
+    .sort((a, b) => a.name.localeCompare(b.name, "de") * (sortKey === "key" ? sortDir : 1));
+  $("statCount").textContent = folders.length + files.length;
   $("statSize").textContent = fmtSize(files.reduce((s, f) => s + f.size, 0));
   document.querySelectorAll("th[data-sort]").forEach(th => {
     th.querySelector(".arrow").textContent = th.dataset.sort === sortKey ? (sortDir > 0 ? "▲" : "▼") : "";
@@ -277,16 +334,46 @@ function render() {
 
   const tbody = $("files");
   tbody.innerHTML = "";
-  if (!list.length) {
-    const msg = files.length ? "Keine Datei passt zur Suche." : "Der Bucket ist leer.";
-    tbody.innerHTML = `<tr><td colspan="4" class="empty">${msg}</td></tr>`;
+  if (prefix) {
+    const up = prefix.slice(0, -1).split("/").slice(0, -1).join("/");
+    const tr = document.createElement("tr"); tr.className = "folder";
+    tr.innerHTML = '<td class="name"><div><span class="ext folder">↑</span><span>.. (eine Ebene höher)</span></div></td><td></td><td class="hide-sm"></td><td></td>';
+    tr.querySelector("span:last-child").onclick = () => openFolder(up ? up + "/" : "");
+    tbody.append(tr);
+  }
+  for (const d of dirs) {
+    const tr = document.createElement("tr"); tr.className = "folder";
+    const name = document.createElement("td"); name.className = "name";
+    const wrap = document.createElement("div");
+    const badge = document.createElement("span"); badge.className = "ext folder"; badge.textContent = "📁";
+    const label = document.createElement("span"); label.textContent = d.name;
+    label.onclick = () => openFolder(d.prefix);
+    wrap.append(badge, label); name.append(wrap);
+    const size = document.createElement("td"); size.textContent = "Ordner";
+    const mod = document.createElement("td"); mod.className = "hide-sm";
+    const act = document.createElement("td"); act.className = "actions";
+    const open = document.createElement("button"); open.className = "ghost"; open.textContent = "Öffnen";
+    open.onclick = () => openFolder(d.prefix);
+    act.append(open);
+    if (role() !== "viewer") {
+      const del = document.createElement("button"); del.className = "danger"; del.textContent = "Löschen";
+      del.onclick = () => removeFolder(d);
+      act.append(del);
+    }
+    tr.append(name, size, mod, act);
+    tbody.append(tr);
+  }
+  if (!list.length && !dirs.length) {
+    const msg = files.length || folders.length ? "Nichts passt zur Suche."
+      : prefix ? "Dieser Ordner ist leer." : "Der Bucket ist leer.";
+    tbody.insertAdjacentHTML("beforeend", `<tr><td colspan="4" class="empty">${msg}</td></tr>`);
     return;
   }
   for (const f of list) {
     const tr = document.createElement("tr");
     const name = document.createElement("td"); name.className = "name";
-    const badge = document.createElement("span"); badge.className = "ext"; badge.textContent = ext(f.key);
-    const label = document.createElement("span"); label.textContent = f.key;
+    const badge = document.createElement("span"); badge.className = "ext"; badge.textContent = ext(f.name);
+    const label = document.createElement("span"); label.textContent = f.name;
     const wrap = document.createElement("div");
     wrap.append(badge, label);
     name.append(wrap);
@@ -339,6 +426,7 @@ function uploadOne(file) {
   return new Promise((resolve) => {
     const fd = new FormData();
     fd.append("role", role());
+    fd.append("prefix", prefix);
     fd.append("file", file);
     const xhr = new XMLHttpRequest();
     xhr.open("POST", "/api/upload");
@@ -430,6 +518,58 @@ async function remove(key) {
     toast("Löschen abgelehnt: " + (d.code || d.error || r.status), "err");
   }
 }
+
+async function removeFolder(d) {
+  if (!confirm(`Ordner „${d.name}“ mit ALLEM Inhalt wirklich löschen?`)) return;
+  const fd = new FormData();
+  fd.append("role", role());
+  fd.append("key", d.prefix);
+  const r = await fetch("/api/delete", { method: "POST", body: fd });
+  const data = await r.json();
+  if (data.ok) {
+    log(`Ordner „${d.name}“ gelöscht (${data.deleted} Objekt(e), ${role()}).`, "ok");
+    toast(`Ordner „${d.name}“ gelöscht`, "ok");
+  } else {
+    log(`Löschen von Ordner „${d.name}“ abgelehnt (HTTP ${data.status || r.status}): ${data.code || ""} ${data.message || data.error || ""}`, "err");
+    toast("Löschen abgelehnt: " + (data.code || data.error || r.status), "err");
+  }
+  loadFiles();
+}
+
+async function createFolder(name) {
+  const fd = new FormData();
+  fd.append("role", role());
+  fd.append("prefix", prefix);
+  fd.append("name", name);
+  const r = await fetch("/api/mkdir", { method: "POST", body: fd });
+  const d = await r.json();
+  if (d.ok) {
+    log(`Ordner „${name}“ in /${prefix} erstellt (${role()}).`, "ok");
+    toast(`Ordner „${name}“ erstellt`, "ok");
+    $("mkdirRow").hidden = true;
+    loadFiles();
+  } else {
+    log(`Ordner „${name}“ nicht erstellt (HTTP ${d.status || r.status}): ${d.code || ""} ${d.message || d.error || ""}`, "err");
+    toast("Ordner nicht erstellt: " + (d.code || d.error || r.status), "err");
+  }
+}
+
+$("mkdirBtn").onclick = () => {
+  $("mkdirRow").hidden = !$("mkdirRow").hidden;
+  if (!$("mkdirRow").hidden) { $("mkdirName").value = ""; $("mkdirName").focus(); }
+};
+$("mkdirCancel").onclick = () => { $("mkdirRow").hidden = true; };
+$("mkdirRow").onsubmit = (e) => {
+  e.preventDefault();
+  const name = $("mkdirName").value.trim();
+  if (!name) return;
+  if (/[\/\\]/.test(name) || name === "." || name === "..") {
+    toast("Der Name darf kein / oder \\ enthalten", "err");
+    return;
+  }
+  if (folders.some(d => d.name === name)) { toast("Diesen Ordner gibt es hier schon", "err"); return; }
+  createFolder(name);
+};
 
 // Drag & Drop
 const drop = $("drop");
