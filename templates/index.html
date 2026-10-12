@@ -5,21 +5,14 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>SecureVault</title>
 <style>
+  /* Immer dunkles Design, unabhaengig von der Systemeinstellung */
   :root {
-    --bg: #F2F4F8; --card: #FFFFFF; --ink: #14213D; --muted: #5A6475;
-    --line: #DDE2EA; --accent: #C8102E; --accent-soft: #FBE7EA;
-    --ok: #1E7A34; --okbg: #E8F5EC; --err: #B42318; --errbg: #FDECEA;
-    --code: #EEF1F5; --head: #14213D; --head-ink: #FFFFFF;
-    --shadow: 0 1px 2px rgba(20,33,61,.06), 0 4px 16px rgba(20,33,61,.06);
-  }
-  @media (prefers-color-scheme: dark) {
-    :root {
-      --bg: #0E1420; --card: #161E2E; --ink: #E6EAF2; --muted: #98A2B3;
-      --line: #273247; --accent: #F0566E; --accent-soft: #3A1C25;
-      --ok: #6FD08C; --okbg: #15301F; --err: #FF8A80; --errbg: #3A1A1A;
-      --code: #1E2839; --head: #0A0F18; --head-ink: #E6EAF2;
-      --shadow: 0 1px 2px rgba(0,0,0,.3), 0 4px 16px rgba(0,0,0,.25);
-    }
+    color-scheme: dark;
+    --bg: #0E1420; --card: #161E2E; --ink: #E6EAF2; --muted: #98A2B3;
+    --line: #273247; --accent: #F0566E; --accent-soft: #3A1C25;
+    --ok: #6FD08C; --okbg: #15301F; --err: #FF8A80; --errbg: #3A1A1A;
+    --code: #1E2839; --head: #0A0F18; --head-ink: #E6EAF2;
+    --shadow: 0 1px 2px rgba(0,0,0,.3), 0 4px 16px rgba(0,0,0,.25);
   }
   * { box-sizing: border-box; }
   body { margin: 0; background: var(--bg); color: var(--ink);
