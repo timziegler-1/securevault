@@ -167,10 +167,12 @@ def upload():
         return jsonify(error="Rolle oder Datei fehlt"), 400
     try:
         prefix = clean_prefix(request.values.get("prefix"))
+        # Bei Ordner-Uploads: Unterordner innerhalb des Zielordners, z. B. "Fotos/2026/"
+        subdir = clean_prefix(request.values.get("subdir"))
     except ValueError as e:
         return jsonify(error=str(e)), 400
     s3, bucket = client_for(role)
-    key = prefix + os.path.basename(f.filename)
+    key = prefix + subdir + os.path.basename(f.filename)
     result = presigned_put(s3, bucket, key, f.read(), f.mimetype or "application/octet-stream")
     return jsonify(**result)
 

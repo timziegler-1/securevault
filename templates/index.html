@@ -171,9 +171,14 @@
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
         <path d="M12 16V4"/><path d="m6 10 6-6 6 6"/><path d="M4 20h16"/>
       </svg>
-      <strong>Dateien hierher ziehen oder klicken</strong>
+      <strong>Dateien oder Ordner hierher ziehen oder klicken</strong>
       <small id="dropHint">Mehrere Dateien möglich, max. 50 MB pro Datei</small>
     </label>
+    <input type="file" id="folderInput" webkitdirectory multiple hidden>
+    <div class="row" style="margin-top:12px">
+      <button class="ghost" id="pickFiles">📄 Dateien auswählen</button>
+      <button class="ghost" id="pickFolder">📁 Ordner auswählen</button>
+    </div>
     <div id="queue"></div>
     <p class="hint">Der Server erzeugt pro Datei eine Upload-URL (gültig {{ expires }} s) und lädt sie damit in den Bucket. Mit dem Viewer-Key lehnt B2 den Upload ab.</p>
   </section>
@@ -439,12 +444,14 @@ function showLink(url, seconds, info) {
   timerId = setInterval(tick, 1000);
 }
 
-// target = Zielordner im Bucket, z. B. "Dokumente/2026/" ("" = oberste Ebene)
-function uploadOne(file, target) {
+// target = Zielordner im Bucket, z. B. "Dokumente/" ("" = oberste Ebene)
+// rel = Pfad innerhalb eines hochgeladenen Ordners, z. B. "Fotos/2026/bild.jpg"
+function uploadOne(file, rel, target) {
+  const subdir = rel.includes("/") ? rel.slice(0, rel.lastIndexOf("/") + 1) : "";
   const item = document.createElement("div");
   item.className = "qitem";
   item.innerHTML = '<span class="name"></span><span class="state">wartet …</span><div class="bar"><i></i></div>';
-  item.querySelector(".name").textContent = "/" + target + file.name;
+  item.querySelector(".name").textContent = "/" + target + rel;
   $("queue").prepend(item);
   const state = item.querySelector(".state"), bar = item.querySelector(".bar");
 
@@ -452,6 +459,7 @@ function uploadOne(file, target) {
     const fd = new FormData();
     fd.append("role", role());
     fd.append("prefix", target);
+    fd.append("subdir", subdir);
     fd.append("file", file);
     const xhr = new XMLHttpRequest();
     xhr.open("POST", "/api/upload");
@@ -488,9 +496,13 @@ function uploadOne(file, target) {
 // Fragt nach dem Zielordner im Bucket; liefert den Ordner oder null bei Abbruch
 async function askTarget(list) {
   const dlg = $("targetDlg"), box = $("targetList");
-  $("targetFiles").textContent = list.length === 1
-    ? `Datei: ${list[0].name}`
-    : `${list.length} Dateien: ${list.slice(0, 3).map(f => f.name).join(", ")}${list.length > 3 ? " …" : ""}`;
+  const tops = [...new Set(list.map(x => x.rel.split("/")[0]))];
+  const dirs = tops.filter(t => list.some(x => x.rel.startsWith(t + "/")));
+  $("targetFiles").textContent = dirs.length
+    ? `Ordner ${dirs.map(d => "„" + d + "“").join(", ")} mit ${list.length} Datei(en)`
+    : list.length === 1
+      ? `Datei: ${list[0].rel}`
+      : `${list.length} Dateien: ${tops.slice(0, 3).join(", ")}${tops.length > 3 ? " …" : ""}`;
   box.innerHTML = '<div class="hint" style="padding:8px">Ordner werden geladen …</div>';
   dlg.showModal();
 
@@ -537,22 +549,49 @@ async function askTarget(list) {
   });
 }
 
+// list: File-Objekte oder {file, rel}; bei Ordnerauswahl liefert der Browser webkitRelativePath
 async function uploadFiles(list) {
   $("file").value = "";
-  if (!list.length) return;
-  const target = await askTarget(list);
+  $("folderInput").value = "";
+  const items = list.map(x => x instanceof File ? { file: x, rel: x.webkitRelativePath || x.name } : x);
+  if (!items.length) return;
+  const target = await askTarget(items);
   if (target === null) { log("Upload abgebrochen."); return; }
   let ok = 0;
-  for (const f of list) {
-    if (f.size > 50 * 1024 * 1024) {
-      log(`„${f.name}“ ist grösser als 50 MB und wurde übersprungen.`, "err");
+  for (const { file, rel } of items) {
+    if (file.size > 50 * 1024 * 1024) {
+      log(`„${rel}“ ist grösser als 50 MB und wurde übersprungen.`, "err");
       continue;
     }
-    if (await uploadOne(f, target)) ok++;
+    if (await uploadOne(file, rel, target)) ok++;
   }
-  toast(`${ok} von ${list.length} Datei(en) nach /${target} hochgeladen`, ok === list.length ? "ok" : "err");
+  toast(`${ok} von ${items.length} Datei(en) nach /${target} hochgeladen`, ok === items.length ? "ok" : "err");
   if (ok && target !== prefix) openFolder(target);  // Zielordner anzeigen
   else loadFiles();
+}
+
+// Gezogene Ordner rekursiv durchgehen (Drag & Drop liefert Verzeichnis-Eintraege)
+async function collectEntry(entry, path, out) {
+  if (entry.isFile) {
+    const file = await new Promise((res, rej) => entry.file(res, rej));
+    out.push({ file, rel: path + file.name });
+  } else if (entry.isDirectory) {
+    const reader = entry.createReader();
+    let batch;
+    do {
+      batch = await new Promise((res, rej) => reader.readEntries(res, rej));
+      for (const e of batch) await collectEntry(e, path + entry.name + "/", out);
+    } while (batch.length);
+  }
+}
+
+async function handleDrop(e) {
+  const entries = [...(e.dataTransfer.items || [])]
+    .map(i => i.webkitGetAsEntry && i.webkitGetAsEntry()).filter(Boolean);
+  if (!entries.length) return uploadFiles([...e.dataTransfer.files]);
+  const out = [];
+  for (const en of entries) await collectEntry(en, "", out);
+  uploadFiles(out);
 }
 
 async function getUrl(key) {
@@ -655,8 +694,11 @@ $("mkdirRow").onsubmit = (e) => {
 const drop = $("drop");
 ["dragenter", "dragover"].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.add("over"); }));
 ["dragleave", "drop"].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.remove("over"); }));
-drop.addEventListener("drop", e => uploadFiles([...e.dataTransfer.files]));
+drop.addEventListener("drop", handleDrop);
 $("file").onchange = () => uploadFiles([...$("file").files]);
+$("folderInput").onchange = () => uploadFiles([...$("folderInput").files]);
+$("pickFiles").onclick = () => $("file").click();
+$("pickFolder").onclick = () => $("folderInput").click();
 $("backBtn").onclick = () => {
   const up = prefix.slice(0, -1).split("/").slice(0, -1).join("/");
   openFolder(up ? up + "/" : "");
