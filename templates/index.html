@@ -6,81 +6,178 @@
 <title>SecureVault</title>
 <style>
   :root {
-    --bg: #F4F6F9; --card: #FFFFFF; --ink: #14213D; --muted: #5A6475;
-    --line: #DDE2EA; --accent: #C8102E; --ok: #1E7A34; --okbg: #E8F5EC;
-    --err: #B42318; --errbg: #FDECEA; --code: #EEF1F5;
+    --bg: #F2F4F8; --card: #FFFFFF; --ink: #14213D; --muted: #5A6475;
+    --line: #DDE2EA; --accent: #C8102E; --accent-soft: #FBE7EA;
+    --ok: #1E7A34; --okbg: #E8F5EC; --err: #B42318; --errbg: #FDECEA;
+    --code: #EEF1F5; --head: #14213D; --head-ink: #FFFFFF;
+    --shadow: 0 1px 2px rgba(20,33,61,.06), 0 4px 16px rgba(20,33,61,.06);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0E1420; --card: #161E2E; --ink: #E6EAF2; --muted: #98A2B3;
+      --line: #273247; --accent: #F0566E; --accent-soft: #3A1C25;
+      --ok: #6FD08C; --okbg: #15301F; --err: #FF8A80; --errbg: #3A1A1A;
+      --code: #1E2839; --head: #0A0F18; --head-ink: #E6EAF2;
+      --shadow: 0 1px 2px rgba(0,0,0,.3), 0 4px 16px rgba(0,0,0,.25);
+    }
   }
   * { box-sizing: border-box; }
   body { margin: 0; background: var(--bg); color: var(--ink);
          font: 15px/1.5 "Segoe UI", system-ui, Arial, sans-serif; }
-  header { background: var(--ink); color: #fff; padding: 18px 24px;
+
+  header { background: var(--head); color: var(--head-ink); padding: 16px 24px;
            display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
-  header h1 { margin: 0; font-size: 22px; letter-spacing: .3px; }
-  header h1 span { color: #F4A3B0; font-weight: 400; font-size: 15px; margin-left: 8px; }
-  .role { display: flex; align-items: center; gap: 10px; }
-  .role select { font: inherit; padding: 6px 10px; border-radius: 6px; border: 0; }
-  .badge { padding: 3px 10px; border-radius: 999px; font-size: 13px; font-weight: 600; }
-  .badge.admin { background: #F4A3B0; color: #5B0715; }
-  .badge.viewer { background: #A9D3F5; color: #0B3558; }
-  .badge.standard { background: #ddd; color: #333; }
-  main { max-width: 980px; margin: 24px auto; padding: 0 16px; display: grid; gap: 20px; }
-  .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 18px 20px; }
+  .brand { display: flex; align-items: center; gap: 12px; }
+  .brand svg { width: 34px; height: 34px; flex: none; }
+  .brand h1 { margin: 0; font-size: 21px; letter-spacing: .3px; line-height: 1.2; }
+  .brand p { margin: 0; font-size: 13px; opacity: .7; }
+
+  .role { display: flex; align-items: center; gap: 4px; background: rgba(255,255,255,.08);
+          padding: 4px; border-radius: 999px; }
+  .role button { background: transparent; border: 0; color: inherit; padding: 6px 14px;
+                 border-radius: 999px; font-weight: 600; }
+  .role button.active.admin { background: #F4A3B0; color: #5B0715; }
+  .role button.active.viewer { background: #A9D3F5; color: #0B3558; }
+  .role button.active.standard { background: #ddd; color: #333; }
+  .rights { font-size: 13px; opacity: .8; margin-left: 8px; }
+
+  main { max-width: 1000px; margin: 24px auto; padding: 0 16px; display: grid; gap: 20px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px;
+          padding: 18px 20px; box-shadow: var(--shadow); }
   .card h2 { margin: 0 0 12px; font-size: 17px; }
   .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
-  button { font: inherit; cursor: pointer; border-radius: 6px; padding: 7px 14px;
-           border: 1px solid var(--ink); background: var(--ink); color: #fff; }
-  button.ghost { background: #fff; color: var(--ink); }
-  button.danger { background: #fff; color: var(--err); border-color: var(--err); }
+  .spread { justify-content: space-between; }
+
+  button { font: inherit; cursor: pointer; border-radius: 8px; padding: 7px 14px;
+           border: 1px solid var(--ink); background: var(--ink); color: var(--card); }
+  button.ghost { background: transparent; color: var(--ink); border-color: var(--line); }
+  button.ghost:hover { border-color: var(--ink); }
+  button.danger { background: transparent; color: var(--err); border-color: var(--err); }
   button:disabled { opacity: .5; cursor: default; }
-  table { width: 100%; border-collapse: collapse; }
-  th, td { text-align: left; padding: 8px 6px; border-bottom: 1px solid var(--line); }
-  th { color: var(--muted); font-weight: 600; font-size: 13px; }
+
+  .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+  .stat { background: var(--card); border: 1px solid var(--line); border-radius: 12px;
+          padding: 14px 16px; box-shadow: var(--shadow); }
+  .stat b { display: block; font-size: 22px; }
+  .stat span { color: var(--muted); font-size: 13px; }
+
+  .drop { display: block; border: 2px dashed var(--line); border-radius: 12px; padding: 28px 16px; text-align: center;
+          cursor: pointer; transition: border-color .15s, background .15s; }
+  .drop:hover, .drop.over { border-color: var(--accent); background: var(--accent-soft); }
+  .drop.locked { cursor: default; opacity: .75; }
+  .drop svg { display: block; margin: 0 auto; width: 36px; height: 36px; color: var(--muted); }
+  .drop small { display: block; }
+  .drop strong { display: block; margin-top: 6px; }
+  .drop small { color: var(--muted); }
+  #queue { display: grid; gap: 8px; margin-top: 12px; }
+  .qitem { display: grid; grid-template-columns: 1fr auto; gap: 4px 12px; font-size: 14px; }
+  .qitem .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .qitem .state { color: var(--muted); font-size: 13px; }
+  .qitem .state.ok { color: var(--ok); } .qitem .state.err { color: var(--err); }
+  .bar { grid-column: 1 / -1; height: 6px; background: var(--code); border-radius: 99px; overflow: hidden; }
+  .bar i { display: block; height: 100%; width: 0; background: var(--accent); transition: width .15s; }
+  .bar.ok i { background: var(--ok); } .bar.err i { background: var(--err); }
+
+  .search { flex: 1; min-width: 180px; font: inherit; padding: 7px 12px; border-radius: 8px;
+            border: 1px solid var(--line); background: var(--card); color: var(--ink); }
+  table { width: 100%; border-collapse: collapse; margin-top: 12px; }
+  th, td { text-align: left; padding: 9px 6px; border-bottom: 1px solid var(--line); }
+  th { color: var(--muted); font-weight: 600; font-size: 13px; cursor: pointer; user-select: none; white-space: nowrap; }
+  th.nosort { cursor: default; }
+  th .arrow { opacity: .6; font-size: 11px; }
+  td.name > div { display: flex; align-items: center; gap: 8px; word-break: break-all; }
+  .ext { flex: none; font-size: 10px; font-weight: 700; text-transform: uppercase; border-radius: 4px;
+         padding: 2px 5px; background: var(--code); color: var(--muted); min-width: 34px; text-align: center; }
   td.actions { text-align: right; white-space: nowrap; }
   td.actions button { padding: 4px 10px; font-size: 13px; margin-left: 4px; }
-  .empty { color: var(--muted); padding: 10px 0; }
-  .url { background: var(--code); border-radius: 6px; padding: 8px 10px; font: 12px Consolas, monospace;
+  .empty { color: var(--muted); padding: 14px 0; text-align: center; }
+
+  .url { background: var(--code); border-radius: 8px; padding: 8px 10px; font: 12px Consolas, monospace;
          word-break: break-all; max-height: 74px; overflow: auto; margin: 8px 0; }
   .timer { font-weight: 700; }
   .timer.expired { color: var(--err); }
-  #log { display: grid; gap: 6px; }
-  .entry { border-radius: 6px; padding: 8px 12px; font-size: 14px; }
+  .meter { height: 6px; background: var(--code); border-radius: 99px; overflow: hidden; margin-top: 6px; }
+  .meter i { display: block; height: 100%; background: var(--ok); transition: width 1s linear; }
+  .meter.low i { background: var(--err); }
+
+  #log { display: grid; gap: 6px; max-height: 260px; overflow: auto; }
+  .entry { border-radius: 8px; padding: 8px 12px; font-size: 14px; }
   .entry.ok { background: var(--okbg); color: var(--ok); }
   .entry.err { background: var(--errbg); color: var(--err); }
   .entry.info { background: var(--code); color: var(--ink); }
-  .entry time { color: var(--muted); font-size: 12px; margin-right: 8px; }
+  .entry time { opacity: .7; font-size: 12px; margin-right: 8px; }
   .hint { color: var(--muted); font-size: 13px; margin: 6px 0 0; }
-  @media (max-width: 600px) { td.actions button { display: block; margin: 4px 0 0 auto; } }
+
+  #toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%) translateY(20px);
+           padding: 10px 18px; border-radius: 10px; box-shadow: var(--shadow); opacity: 0;
+           transition: opacity .2s, transform .2s; pointer-events: none; max-width: 90vw; }
+  #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+  #toast.ok { background: var(--okbg); color: var(--ok); }
+  #toast.err { background: var(--errbg); color: var(--err); }
+  #toast.info { background: var(--card); color: var(--ink); }
+
+  @media (max-width: 640px) {
+    .stats { grid-template-columns: 1fr 1fr; }
+    th.hide-sm, td.hide-sm { display: none; }
+    td.actions button { display: block; margin: 4px 0 0 auto; }
+  }
 </style>
 </head>
 <body>
 <header>
-  <h1>SecureVault <span>Sicherer Filehosting-Service mit Backblaze B2</span></h1>
-  <div class="role">
-    <label for="role">Rolle:</label>
-    <select id="role">
-      {% for r in roles %}<option value="{{ r }}">{{ r|capitalize }}</option>{% endfor %}
-    </select>
-    <span id="roleBadge" class="badge"></span>
+  <div class="brand">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <rect x="3" y="10" width="18" height="11" rx="2"/><path d="M7 10V7a5 5 0 0 1 10 0v3"/><circle cx="12" cy="15.5" r="1.5"/>
+    </svg>
+    <div>
+      <h1>SecureVault</h1>
+      <p>Sicherer Filehosting-Service mit Backblaze B2</p>
+    </div>
+  </div>
+  <div class="row">
+    <div class="role" id="roleSwitch">
+      {% for r in roles %}<button data-role="{{ r }}" class="{{ r }}">{{ r|capitalize }}</button>{% endfor %}
+    </div>
+    <span class="rights" id="rights"></span>
   </div>
 </header>
 
 <main>
+  <div class="stats">
+    <div class="stat"><b id="statCount">–</b><span>Dateien im Bucket</span></div>
+    <div class="stat"><b id="statSize">–</b><span>Gesamtgrösse</span></div>
+    <div class="stat"><b>{{ expires }} s</b><span>Gültigkeit Presigned URL</span></div>
+  </div>
+
   <section class="card">
-    <h2>Datei hochladen</h2>
-    <div class="row">
-      <input type="file" id="file">
-      <button id="uploadBtn">Hochladen</button>
-    </div>
-    <p class="hint">Der Server erzeugt eine Upload-URL (gültig {{ expires }} s) und lädt die Datei damit in den Bucket. Mit dem Viewer-Key lehnt B2 den Upload ab.</p>
+    <h2>Dateien hochladen</h2>
+    <label class="drop" id="drop">
+      <input type="file" id="file" multiple hidden>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M12 16V4"/><path d="m6 10 6-6 6 6"/><path d="M4 20h16"/>
+      </svg>
+      <strong>Dateien hierher ziehen oder klicken</strong>
+      <small id="dropHint">Mehrere Dateien möglich, max. 50 MB pro Datei</small>
+    </label>
+    <div id="queue"></div>
+    <p class="hint">Der Server erzeugt pro Datei eine Upload-URL (gültig {{ expires }} s) und lädt sie damit in den Bucket. Mit dem Viewer-Key lehnt B2 den Upload ab.</p>
   </section>
 
   <section class="card">
-    <div class="row" style="justify-content: space-between">
+    <div class="row spread">
       <h2 style="margin:0">Dateien im Bucket <span id="bucket" style="color:var(--muted);font-weight:400"></span></h2>
       <button class="ghost" id="refreshBtn">Aktualisieren</button>
     </div>
+    <div class="row" style="margin-top:12px">
+      <input class="search" id="search" type="search" placeholder="Dateien suchen …">
+    </div>
     <table>
-      <thead><tr><th>Datei</th><th>Grösse</th><th>Hochgeladen</th><th></th></tr></thead>
+      <thead><tr>
+        <th data-sort="key">Datei <span class="arrow"></span></th>
+        <th data-sort="size">Grösse <span class="arrow"></span></th>
+        <th data-sort="modified" class="hide-sm">Hochgeladen <span class="arrow"></span></th>
+        <th class="nosort"></th>
+      </tr></thead>
       <tbody id="files"></tbody>
     </table>
   </section>
@@ -88,6 +185,7 @@
   <section class="card" id="linkCard" hidden>
     <h2>Letzte Presigned URL</h2>
     <div><span id="linkInfo"></span> · noch <span class="timer" id="timer"></span></div>
+    <div class="meter" id="meter"><i></i></div>
     <div class="url" id="linkUrl"></div>
     <div class="row">
       <button class="ghost" id="openLink">Link öffnen</button>
@@ -97,17 +195,27 @@
   </section>
 
   <section class="card">
-    <h2>Protokoll</h2>
-    <div id="log"><div class="entry info">Bereit.</div></div>
+    <div class="row spread">
+      <h2 style="margin:0">Protokoll</h2>
+      <button class="ghost" id="clearLog">Leeren</button>
+    </div>
+    <div id="log" style="margin-top:12px"><div class="entry info">Bereit.</div></div>
   </section>
 </main>
 
+<div id="toast"></div>
+
 <script>
 const $ = (id) => document.getElementById(id);
-const roleSel = $("role");
-let lastUrl = null, expiresAt = 0, timerId = null;
+const ROLES = [...document.querySelectorAll("#roleSwitch button")].map(b => b.dataset.role);
+let currentRole = localStorageGet("sv-role");
+if (!ROLES.includes(currentRole)) currentRole = ROLES[0];
+let files = [], sortKey = "modified", sortDir = -1;
+let lastUrl = null, expiresAt = 0, linkSeconds = 300, timerId = null, toastId = null;
 
-function role() { return roleSel.value; }
+function localStorageGet(k) { try { return localStorage.getItem(k); } catch { return null; } }
+function localStorageSet(k, v) { try { localStorage.setItem(k, v); } catch {} }
+function role() { return currentRole; }
 
 function log(text, kind = "info") {
   const e = document.createElement("div");
@@ -118,40 +226,89 @@ function log(text, kind = "info") {
   $("log").prepend(e);
 }
 
-function showRole() {
-  const b = $("roleBadge");
-  b.className = "badge " + role();
-  b.textContent = role() === "admin" ? "Lesen + Schreiben" : role() === "viewer" ? "Nur Lesen" : "aus .env";
+function toast(text, kind = "info") {
+  const t = $("toast");
+  t.textContent = text;
+  t.className = "show " + kind;
+  clearTimeout(toastId);
+  toastId = setTimeout(() => t.className = kind, 3000);
+}
+
+function setRole(r) {
+  currentRole = r;
+  localStorageSet("sv-role", r);
+  document.querySelectorAll("#roleSwitch button").forEach(b => b.classList.toggle("active", b.dataset.role === r));
+  $("rights").textContent = r === "admin" ? "Lesen + Schreiben" : r === "viewer" ? "Nur Lesen" : "aus .env";
+  $("dropHint").textContent = r === "viewer"
+    ? "Viewer hat nur Leserechte – B2 wird den Upload ablehnen"
+    : "Mehrere Dateien möglich, max. 50 MB pro Datei";
+  $("drop").classList.toggle("locked", r === "viewer");
 }
 
 function fmtSize(n) {
   if (n < 1024) return n + " B";
   if (n < 1048576) return (n / 1024).toFixed(1) + " KB";
-  return (n / 1048576).toFixed(1) + " MB";
+  if (n < 1073741824) return (n / 1048576).toFixed(1) + " MB";
+  return (n / 1073741824).toFixed(2) + " GB";
+}
+
+function ext(name) {
+  const i = name.lastIndexOf(".");
+  return i > 0 ? name.slice(i + 1, i + 5) : "–";
 }
 
 async function loadFiles() {
+  try {
+    const r = await fetch("/api/files?role=" + encodeURIComponent(role()));
+    const data = await r.json();
+    if (!r.ok) { log("Dateiliste nicht lesbar: " + data.error, "err"); files = []; render(); return; }
+    $("bucket").textContent = "(" + data.bucket + ")";
+    files = data.files;
+    render();
+  } catch (e) {
+    log("Server nicht erreichbar: " + e.message, "err");
+  }
+}
+
+function render() {
+  const q = $("search").value.trim().toLowerCase();
+  const list = files.filter(f => f.key.toLowerCase().includes(q)).sort((a, b) => {
+    const x = a[sortKey], y = b[sortKey];
+    return (x < y ? -1 : x > y ? 1 : 0) * sortDir;
+  });
+  $("statCount").textContent = files.length;
+  $("statSize").textContent = fmtSize(files.reduce((s, f) => s + f.size, 0));
+  document.querySelectorAll("th[data-sort]").forEach(th => {
+    th.querySelector(".arrow").textContent = th.dataset.sort === sortKey ? (sortDir > 0 ? "▲" : "▼") : "";
+  });
+
   const tbody = $("files");
   tbody.innerHTML = "";
-  const r = await fetch("/api/files?role=" + encodeURIComponent(role()));
-  const data = await r.json();
-  if (!r.ok) { log("Dateiliste nicht lesbar: " + data.error, "err"); return; }
-  $("bucket").textContent = "(" + data.bucket + ")";
-  if (!data.files.length) {
-    tbody.innerHTML = '<tr><td colspan="4" class="empty">Der Bucket ist leer.</td></tr>';
+  if (!list.length) {
+    const msg = files.length ? "Keine Datei passt zur Suche." : "Der Bucket ist leer.";
+    tbody.innerHTML = `<tr><td colspan="4" class="empty">${msg}</td></tr>`;
     return;
   }
-  for (const f of data.files) {
+  for (const f of list) {
     const tr = document.createElement("tr");
-    const name = document.createElement("td"); name.textContent = f.key;
+    const name = document.createElement("td"); name.className = "name";
+    const badge = document.createElement("span"); badge.className = "ext"; badge.textContent = ext(f.key);
+    const label = document.createElement("span"); label.textContent = f.key;
+    const wrap = document.createElement("div");
+    wrap.append(badge, label);
+    name.append(wrap);
     const size = document.createElement("td"); size.textContent = fmtSize(f.size);
-    const mod = document.createElement("td"); mod.textContent = new Date(f.modified).toLocaleString("de-CH");
+    const mod = document.createElement("td"); mod.className = "hide-sm";
+    mod.textContent = new Date(f.modified).toLocaleString("de-CH");
     const act = document.createElement("td"); act.className = "actions";
     const dl = document.createElement("button"); dl.className = "ghost"; dl.textContent = "Download";
     dl.onclick = () => download(f.key);
+    const cp = document.createElement("button"); cp.className = "ghost"; cp.textContent = "Link";
+    cp.title = "Download-Link erzeugen und kopieren";
+    cp.onclick = () => shareLink(f.key);
     const del = document.createElement("button"); del.className = "danger"; del.textContent = "Löschen";
     del.onclick = () => remove(f.key);
-    act.append(dl, del);
+    act.append(dl, cp, del);
     tr.append(name, size, mod, act);
     tbody.append(tr);
   }
@@ -159,6 +316,7 @@ async function loadFiles() {
 
 function showLink(url, seconds, info) {
   lastUrl = url;
+  linkSeconds = seconds;
   expiresAt = Date.now() + seconds * 1000;
   $("linkCard").hidden = false;
   $("linkInfo").textContent = info;
@@ -168,41 +326,98 @@ function showLink(url, seconds, info) {
     const left = Math.max(0, Math.round((expiresAt - Date.now()) / 1000));
     $("timer").textContent = left ? left + " s gültig" : "abgelaufen";
     $("timer").classList.toggle("expired", !left);
+    $("meter").firstElementChild.style.width = (left / linkSeconds * 100) + "%";
+    $("meter").classList.toggle("low", left < 30);
     if (!left) clearInterval(timerId);
   };
   tick();
   timerId = setInterval(tick, 1000);
 }
 
-async function upload() {
-  const file = $("file").files[0];
-  if (!file) { log("Bitte zuerst eine Datei auswählen.", "err"); return; }
-  const fd = new FormData();
-  fd.append("role", role());
-  fd.append("file", file);
-  $("uploadBtn").disabled = true;
-  try {
-    const r = await fetch("/api/upload", { method: "POST", body: fd });
-    const d = await r.json();
-    if (d.url) showLink(d.url, d.expires || 300, "Upload-URL für " + d.key);
-    if (d.ok) {
-      log(`Upload von „${d.key}“ erfolgreich (HTTP ${d.status}) als ${role()}.`, "ok");
-      loadFiles();
-    } else {
-      log(`Upload von „${d.key || file.name}“ abgelehnt (HTTP ${d.status || r.status}): ${d.code || ""} ${d.message || d.error || ""}`, "err");
+function uploadOne(file) {
+  const item = document.createElement("div");
+  item.className = "qitem";
+  item.innerHTML = '<span class="name"></span><span class="state">wartet …</span><div class="bar"><i></i></div>';
+  item.querySelector(".name").textContent = file.name;
+  $("queue").prepend(item);
+  const state = item.querySelector(".state"), bar = item.querySelector(".bar");
+
+  return new Promise((resolve) => {
+    const fd = new FormData();
+    fd.append("role", role());
+    fd.append("file", file);
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", "/api/upload");
+    xhr.upload.onprogress = (e) => {
+      if (!e.lengthComputable) return;
+      const p = Math.round(e.loaded / e.total * 100);
+      bar.firstElementChild.style.width = p + "%";
+      state.textContent = p < 100 ? p + " %" : "an B2 senden …";
+    };
+    xhr.onload = () => {
+      let d = {};
+      try { d = JSON.parse(xhr.responseText); } catch {}
+      bar.firstElementChild.style.width = "100%";
+      if (d.url) showLink(d.url, d.expires || 300, "Upload-URL für " + d.key);
+      if (d.ok) {
+        bar.classList.add("ok"); state.classList.add("ok"); state.textContent = "fertig";
+        log(`Upload von „${d.key}“ erfolgreich (HTTP ${d.status}) als ${role()}.`, "ok");
+      } else {
+        bar.classList.add("err"); state.classList.add("err");
+        state.textContent = `abgelehnt (${d.code || d.status || xhr.status})`;
+        log(`Upload von „${d.key || file.name}“ abgelehnt (HTTP ${d.status || xhr.status}): ${d.code || ""} ${d.message || d.error || ""}`, "err");
+      }
+      resolve(!!d.ok);
+    };
+    xhr.onerror = () => {
+      bar.classList.add("err"); state.classList.add("err"); state.textContent = "Fehler";
+      log(`Upload von „${file.name}“ fehlgeschlagen: Server nicht erreichbar.`, "err");
+      resolve(false);
+    };
+    xhr.send(fd);
+  });
+}
+
+async function uploadFiles(list) {
+  if (!list.length) return;
+  let ok = 0;
+  for (const f of list) {
+    if (f.size > 50 * 1024 * 1024) {
+      log(`„${f.name}“ ist grösser als 50 MB und wurde übersprungen.`, "err");
+      continue;
     }
-  } finally {
-    $("uploadBtn").disabled = false;
+    if (await uploadOne(f)) ok++;
   }
+  toast(`${ok} von ${list.length} Datei(en) hochgeladen`, ok === list.length ? "ok" : "err");
+  $("file").value = "";
+  loadFiles();
+}
+
+async function getUrl(key) {
+  const r = await fetch(`/api/download-url?role=${encodeURIComponent(role())}&key=${encodeURIComponent(key)}`);
+  const d = await r.json();
+  if (!r.ok) { log("Download-URL fehlgeschlagen: " + d.error, "err"); return null; }
+  showLink(d.url, d.expires, "Download-URL für " + key);
+  return d.url;
 }
 
 async function download(key) {
-  const r = await fetch(`/api/download-url?role=${encodeURIComponent(role())}&key=${encodeURIComponent(key)}`);
-  const d = await r.json();
-  if (!r.ok) { log("Download-URL fehlgeschlagen: " + d.error, "err"); return; }
-  showLink(d.url, d.expires, "Download-URL für " + key);
-  window.open(d.url, "_blank");
+  const url = await getUrl(key);
+  if (!url) return;
+  window.open(url, "_blank");
   log(`Download-URL für „${key}“ erzeugt und geöffnet (${role()}).`, "ok");
+}
+
+async function shareLink(key) {
+  const url = await getUrl(key);
+  if (!url) return;
+  try {
+    await navigator.clipboard.writeText(url);
+    toast("Link kopiert – gültig " + linkSeconds + " s", "ok");
+    log(`Download-Link für „${key}“ kopiert (${role()}).`, "ok");
+  } catch {
+    toast("Kopieren nicht möglich, Link steht unten", "err");
+  }
 }
 
 async function remove(key) {
@@ -212,20 +427,45 @@ async function remove(key) {
   fd.append("key", key);
   const r = await fetch("/api/delete", { method: "POST", body: fd });
   const d = await r.json();
-  if (d.ok) { log(`„${key}“ gelöscht (${role()}).`, "ok"); loadFiles(); }
-  else log(`Löschen von „${key}“ abgelehnt (HTTP ${d.status || r.status}): ${d.code || ""} ${d.message || d.error || ""}`, "err");
+  if (d.ok) {
+    log(`„${key}“ gelöscht (${role()}).`, "ok");
+    toast(`„${key}“ gelöscht`, "ok");
+    loadFiles();
+  } else {
+    log(`Löschen von „${key}“ abgelehnt (HTTP ${d.status || r.status}): ${d.code || ""} ${d.message || d.error || ""}`, "err");
+    toast("Löschen abgelehnt: " + (d.code || d.error || r.status), "err");
+  }
 }
 
-$("uploadBtn").onclick = upload;
+// Drag & Drop
+const drop = $("drop");
+["dragenter", "dragover"].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.add("over"); }));
+["dragleave", "drop"].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.remove("over"); }));
+drop.addEventListener("drop", e => uploadFiles([...e.dataTransfer.files]));
+$("file").onchange = () => uploadFiles([...$("file").files]);
+
+document.querySelectorAll("th[data-sort]").forEach(th => th.onclick = () => {
+  const k = th.dataset.sort;
+  sortDir = sortKey === k ? -sortDir : (k === "key" ? 1 : -1);
+  sortKey = k;
+  render();
+});
+$("search").oninput = render;
 $("refreshBtn").onclick = loadFiles;
+$("clearLog").onclick = () => { $("log").innerHTML = ""; log("Protokoll geleert."); };
 $("openLink").onclick = () => lastUrl && window.open(lastUrl, "_blank");
 $("copyLink").onclick = async () => {
-  try { await navigator.clipboard.writeText(lastUrl); log("Link kopiert."); }
-  catch { log("Kopieren nicht möglich, bitte von Hand markieren.", "err"); }
+  try { await navigator.clipboard.writeText(lastUrl); toast("Link kopiert", "ok"); }
+  catch { toast("Kopieren nicht möglich, bitte von Hand markieren.", "err"); }
 };
-roleSel.onchange = () => { showRole(); log("Rolle gewechselt zu " + role() + "."); loadFiles(); };
+document.querySelectorAll("#roleSwitch button").forEach(b => b.onclick = () => {
+  if (b.dataset.role === currentRole) return;
+  setRole(b.dataset.role);
+  log("Rolle gewechselt zu " + role() + ".");
+  loadFiles();
+});
 
-showRole();
+setRole(currentRole);
 loadFiles();
 </script>
 </body>
