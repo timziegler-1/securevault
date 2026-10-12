@@ -712,7 +712,7 @@ async function removeFolder(d) {
   const data = await r.json();
   if (handle401(r.status)) return;
   if (data.ok) {
-    log(`Ordner „${d.name}“ gelöscht (${data.deleted} Objekt(e), ${role()}).`, "ok");
+    log(`Ordner „${d.name}“ endgültig gelöscht (${data.deleted} Datei(en), ${role()}).`, "ok");
     toast(`Ordner „${d.name}“ gelöscht`, "ok");
   } else {
     log(`Löschen von Ordner „${d.name}“ abgelehnt (HTTP ${data.status || r.status}): ${data.code || ""} ${data.message || data.error || ""}`, "err");

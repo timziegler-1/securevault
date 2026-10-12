@@ -141,9 +141,12 @@ def presigned_put(s3, bucket, key, data, content_type):
         return {"ok": False, "key": key, "status": e.code, "url": url, **b2_error(e.read())}
 
 
-def presigned_delete(s3, bucket, key):
+def presigned_delete(s3, bucket, key, version_id):
+    """Loescht EINE Version endgueltig. Ohne VersionId wuerde B2 die Datei nur verstecken."""
     url = s3.generate_presigned_url(
-        "delete_object", Params={"Bucket": bucket, "Key": key}, ExpiresIn=EXPIRES
+        "delete_object",
+        Params={"Bucket": bucket, "Key": key, "VersionId": version_id},
+        ExpiresIn=EXPIRES,
     )
     req = urllib.request.Request(url, method="DELETE")
     try:
@@ -262,25 +265,33 @@ def delete():
     if not role or not key:
         return jsonify(error="Rolle oder Dateiname fehlt"), 400
     s3, bucket = client_for(role)
-    if not key.endswith("/"):
-        return jsonify(**presigned_delete(s3, bucket, key))
+    is_folder = key.endswith("/")
+    if is_folder:
+        try:
+            key = clean_prefix(key)
+        except ValueError as e:
+            return jsonify(error=str(e)), 400
 
-    # Ordner: alles darunter loeschen, Platzhalter zuletzt
-    try:
-        prefix = clean_prefix(key)
-    except ValueError as e:
-        return jsonify(error=str(e)), 400
-    keys = []
-    for page in s3.get_paginator("list_objects_v2").paginate(Bucket=bucket, Prefix=prefix):
-        keys += [o["Key"] for o in page.get("Contents", [])]
-    keys.sort(key=lambda k: (k == prefix, k))
+    # B2 behaelt standardmaessig alle Versionen ("Keep all versions"). Ein normales
+    # Loeschen setzt nur eine Loesch-Markierung, die Datei bleibt gespeichert.
+    # Darum alle Versionen und Markierungen einzeln endgueltig loeschen.
+    targets = []
+    for page in s3.get_paginator("list_object_versions").paginate(Bucket=bucket, Prefix=key):
+        for v in page.get("Versions", []) + page.get("DeleteMarkers", []):
+            if is_folder or v["Key"] == key:
+                targets.append((v["Key"], v["VersionId"]))
+    if not targets:
+        return jsonify(ok=False, key=key, status=404, code="NoSuchKey", message="Nicht gefunden")
+    targets.sort(key=lambda t: (t[0] == key and is_folder, t[0]))  # Ordner-Platzhalter zuletzt
+
     deleted = 0
-    for k in keys:
-        result = presigned_delete(s3, bucket, k)
+    for k, version_id in targets:
+        result = presigned_delete(s3, bucket, k, version_id)
         if not result["ok"]:  # z. B. AccessDenied beim Viewer: sofort abbrechen
             return jsonify(**result, deleted=deleted)
         deleted += 1
-    return jsonify(ok=True, key=prefix, status=204, deleted=deleted)
+    files = len({k for k, _ in targets if not k.endswith("/")})
+    return jsonify(ok=True, key=key, status=204, deleted=files, versions=deleted)
 
 
 if __name__ == "__main__":
