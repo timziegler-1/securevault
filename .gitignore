@@ -1,0 +1,12 @@
+# Zugangsdaten - niemals committen!
+.env
+.env.*
+keys_notiz.txt
+
+# Python
+venv/
+__pycache__/
+
+# Testdateien
+downloaded_*.txt
+!.env.example
