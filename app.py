@@ -6,19 +6,24 @@ nie an den Browser geschickt.
 
 Start:  python app.py   ->  http://127.0.0.1:5000
 """
+import hmac
 import os
+import secrets
+import time
 import urllib.error
 import urllib.request
 
 import boto3
 from botocore.config import Config
 from dotenv import dotenv_values
-from flask import Flask, jsonify, render_template, request
+from flask import Flask, abort, jsonify, render_template, request, session
 
 EXPIRES = 300  # Gueltigkeit der Presigned URLs in Sekunden
 
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 50 * 1024 * 1024  # max. 50 MB pro Upload
+app.config["SESSION_COOKIE_HTTPONLY"] = True
+app.config["SESSION_COOKIE_SAMESITE"] = "Strict"
 
 
 def load_roles():
@@ -35,6 +40,11 @@ def load_roles():
 
 ROLES = load_roles()
 
+# Admin-Passwort und Session-Schluessel stehen in .env.admin (nie committen!)
+ADMIN_USER = ROLES.get("admin", {}).get("ADMIN_USER") or "Admin"
+ADMIN_PASSWORD = ROLES.get("admin", {}).get("ADMIN_PASSWORD") or ""
+app.secret_key = ROLES.get("admin", {}).get("FLASK_SECRET_KEY") or secrets.token_hex(32)
+
 
 def client_for(role):
     cfg = ROLES[role]
@@ -49,11 +59,47 @@ def client_for(role):
     return s3, cfg["B2_BUCKET"]
 
 
+def is_admin():
+    return session.get("admin") is True
+
+
 def get_role():
     role = request.values.get("role", "")
     if role not in ROLES:
         return None
+    if role == "admin" and not is_admin():
+        abort(401)  # Admin-Key nur nach Anmeldung
     return role
+
+
+@app.errorhandler(401)
+def unauthorized(_):
+    return jsonify(ok=False, error="NotLoggedIn", message="Bitte als Admin anmelden"), 401
+
+
+@app.route("/api/me")
+def me():
+    return jsonify(admin=is_admin(), login_enabled=bool(ADMIN_PASSWORD))
+
+
+@app.route("/api/login", methods=["POST"])
+def login():
+    user = request.values.get("username", "")
+    pw = request.values.get("password", "")
+    user_ok = hmac.compare_digest(user.encode(), ADMIN_USER.encode())
+    pw_ok = hmac.compare_digest(pw.encode(), ADMIN_PASSWORD.encode())
+    if ADMIN_PASSWORD and user_ok and pw_ok:
+        session.clear()
+        session["admin"] = True
+        return jsonify(ok=True)
+    time.sleep(1)  # bremst das Durchprobieren von Passwoertern
+    return jsonify(ok=False, error="WrongLogin", message="Benutzername oder Passwort falsch"), 401
+
+
+@app.route("/api/logout", methods=["POST"])
+def logout():
+    session.clear()
+    return jsonify(ok=True)
 
 
 def b2_error(body):
@@ -241,4 +287,6 @@ if __name__ == "__main__":
     if not ROLES:
         raise SystemExit("Keine .env.admin, .env.viewer oder .env gefunden.")
     print("Rollen geladen:", ", ".join(ROLES))
+    if "admin" in ROLES and not ADMIN_PASSWORD:
+        print("WARNUNG: ADMIN_PASSWORD fehlt in .env.admin - Admin-Anmeldung ist deaktiviert.")
     app.run(host="127.0.0.1", port=5000, debug=False)

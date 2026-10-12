@@ -85,7 +85,8 @@
   tr.folder td.name span:last-child { font-weight: 600; cursor: pointer; }
   tr.folder td.name span:last-child:hover { text-decoration: underline; }
   .crumbs { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; font-size: 14px; }
-  #backBtn[hidden], #mkdirBtn[hidden] { display: none; }
+  #backBtn[hidden], #mkdirBtn[hidden], #logoutBtn[hidden] { display: none; }
+  header #logoutBtn { color: var(--head-ink); border-color: rgba(255,255,255,.25); padding: 5px 12px; }
   .crumbs a { color: var(--ink); text-decoration: none; padding: 2px 6px; border-radius: 6px; cursor: pointer; }
   .crumbs a:hover { background: var(--code); }
   .crumbs a.current { font-weight: 700; cursor: default; background: transparent; }
@@ -154,6 +155,7 @@
       {% for r in roles %}<button data-role="{{ r }}" class="{{ r }}">{{ r|capitalize }}</button>{% endfor %}
     </div>
     <span class="rights" id="rights"></span>
+    <button class="ghost" id="logoutBtn" hidden>Abmelden</button>
   </div>
 </header>
 
@@ -237,6 +239,22 @@
 
 <div id="toast"></div>
 
+<dialog id="loginDlg">
+  <form id="loginForm">
+    <h2>🔒 Admin-Anmeldung</h2>
+    <p class="hint">Hochladen, Ordner anlegen und Löschen sind nur für den Admin erlaubt.</p>
+    <input class="search" id="loginUser" placeholder="Benutzername" autocomplete="username"
+           style="width:100%; margin-top:12px">
+    <input class="search" id="loginPw" type="password" placeholder="Passwort" autocomplete="current-password"
+           style="width:100%; margin-top:8px">
+    <p class="hint" id="loginErr" style="color:var(--err)"></p>
+    <div class="row" style="justify-content:flex-end; margin-top:8px">
+      <button type="button" class="ghost" id="loginCancel">Abbrechen</button>
+      <button type="submit" id="loginOk">Anmelden</button>
+    </div>
+  </form>
+</dialog>
+
 <dialog id="targetDlg">
   <form method="dialog" id="targetForm">
     <h2>In welchen Ordner hochladen?</h2>
@@ -255,8 +273,8 @@
 <script>
 const $ = (id) => document.getElementById(id);
 const ROLES = [...document.querySelectorAll("#roleSwitch button")].map(b => b.dataset.role);
-let currentRole = localStorageGet("sv-role");
-if (!ROLES.includes(currentRole)) currentRole = ROLES[0];
+let currentRole = ROLES.includes("viewer") ? "viewer" : ROLES[0];
+let isAdmin = false;  // vom Server bestaetigt (/api/me bzw. /api/login)
 let files = [], folders = [], prefix = "", bucketName = "", loadId = 0, sortKey = "modified", sortDir = -1;
 let lastUrl = null, expiresAt = 0, linkSeconds = 300, timerId = null, toastId = null;
 
@@ -281,9 +299,52 @@ function toast(text, kind = "info") {
   toastId = setTimeout(() => t.className = kind, 3000);
 }
 
+// Server meldet 401: Sitzung abgelaufen oder nicht angemeldet -> zurueck zum Viewer
+function handle401(status) {
+  if (status !== 401) return false;
+  isAdmin = false;
+  setRole("viewer");
+  toast("Bitte als Admin anmelden", "err");
+  log("Admin-Sitzung abgelaufen oder nicht angemeldet – zurück zur Viewer-Ansicht.", "err");
+  loadFiles();
+  return true;
+}
+
+function askLogin() {
+  return new Promise((resolve) => {
+    const dlg = $("loginDlg");
+    $("loginPw").value = "";
+    $("loginErr").textContent = "";
+    dlg.showModal();
+    ($("loginUser").value ? $("loginPw") : $("loginUser")).focus();
+    let done = false;
+    const finish = (ok) => { if (!done) { done = true; resolve(ok); } };
+    $("loginCancel").onclick = () => dlg.close();
+    dlg.onclose = () => finish(false);
+    $("loginForm").onsubmit = async (e) => {
+      e.preventDefault();
+      $("loginOk").disabled = true;
+      const fd = new FormData();
+      fd.append("username", $("loginUser").value.trim());
+      fd.append("password", $("loginPw").value);
+      try {
+        const r = await fetch("/api/login", { method: "POST", body: fd });
+        const d = await r.json();
+        if (d.ok) { finish(true); dlg.close(); return; }
+        $("loginErr").textContent = d.message || "Anmeldung fehlgeschlagen";
+        $("loginPw").select();
+      } catch {
+        $("loginErr").textContent = "Server nicht erreichbar";
+      } finally {
+        $("loginOk").disabled = false;
+      }
+    };
+  });
+}
+
 function setRole(r) {
   currentRole = r;
-  localStorageSet("sv-role", r);
+  $("logoutBtn").hidden = !isAdmin;
   document.querySelectorAll("#roleSwitch button").forEach(b => b.classList.toggle("active", b.dataset.role === r));
   $("rights").textContent = r === "admin" ? "Lesen + Schreiben" : r === "viewer" ? "Nur Lesen" : "aus .env";
   $("drop").classList.toggle("locked", r === "viewer");
@@ -341,6 +402,7 @@ async function loadFiles() {
     const r = await fetch(`/api/files?role=${encodeURIComponent(role())}&prefix=${encodeURIComponent(prefix)}`);
     const data = await r.json();
     if (id !== loadId) return;  // inzwischen wurde ein anderer Ordner geoeffnet
+    if (handle401(r.status)) return;
     if (!r.ok) { log("Dateiliste nicht lesbar: " + data.error, "err"); files = []; folders = []; render(); return; }
     bucketName = data.bucket;
     files = data.files;
@@ -473,6 +535,7 @@ function uploadOne(file, rel, target) {
       let d = {};
       try { d = JSON.parse(xhr.responseText); } catch {}
       bar.firstElementChild.style.width = "100%";
+      if (xhr.status === 401) d = { ok: false, code: "NotLoggedIn", message: "Bitte als Admin anmelden", status: 401 };
       if (d.url) showLink(d.url, d.expires || 300, "Upload-URL für " + d.key);
       if (d.ok) {
         bar.classList.add("ok"); state.classList.add("ok"); state.textContent = "fertig";
@@ -597,6 +660,7 @@ async function handleDrop(e) {
 async function getUrl(key) {
   const r = await fetch(`/api/download-url?role=${encodeURIComponent(role())}&key=${encodeURIComponent(key)}`);
   const d = await r.json();
+  if (handle401(r.status)) return null;
   if (!r.ok) { log("Download-URL fehlgeschlagen: " + d.error, "err"); return null; }
   showLink(d.url, d.expires, "Download-URL für " + key);
   return d.url;
@@ -628,6 +692,7 @@ async function remove(key) {
   fd.append("key", key);
   const r = await fetch("/api/delete", { method: "POST", body: fd });
   const d = await r.json();
+  if (handle401(r.status)) return;
   if (d.ok) {
     log(`„${key}“ gelöscht (${role()}).`, "ok");
     toast(`„${key}“ gelöscht`, "ok");
@@ -645,6 +710,7 @@ async function removeFolder(d) {
   fd.append("key", d.prefix);
   const r = await fetch("/api/delete", { method: "POST", body: fd });
   const data = await r.json();
+  if (handle401(r.status)) return;
   if (data.ok) {
     log(`Ordner „${d.name}“ gelöscht (${data.deleted} Objekt(e), ${role()}).`, "ok");
     toast(`Ordner „${d.name}“ gelöscht`, "ok");
@@ -662,6 +728,7 @@ async function createFolder(name) {
   fd.append("name", name);
   const r = await fetch("/api/mkdir", { method: "POST", body: fd });
   const d = await r.json();
+  if (handle401(r.status)) return;
   if (d.ok) {
     log(`Ordner „${name}“ in /${prefix} erstellt (${role()}).`, "ok");
     toast(`Ordner „${name}“ erstellt`, "ok");
@@ -718,15 +785,33 @@ $("copyLink").onclick = async () => {
   try { await navigator.clipboard.writeText(lastUrl); toast("Link kopiert", "ok"); }
   catch { toast("Kopieren nicht möglich, bitte von Hand markieren.", "err"); }
 };
-document.querySelectorAll("#roleSwitch button").forEach(b => b.onclick = () => {
-  if (b.dataset.role === currentRole) return;
-  setRole(b.dataset.role);
+document.querySelectorAll("#roleSwitch button").forEach(b => b.onclick = async () => {
+  const r = b.dataset.role;
+  if (r === currentRole) return;
+  if (r === "admin" && !isAdmin) {
+    if (!(await askLogin())) return;
+    isAdmin = true;
+    log("Als Admin angemeldet.", "ok");
+    toast("Als Admin angemeldet", "ok");
+  }
+  setRole(r);
   log("Rolle gewechselt zu " + role() + ".");
   loadFiles();
 });
+$("logoutBtn").onclick = async () => {
+  try { await fetch("/api/logout", { method: "POST" }); } catch {}
+  isAdmin = false;
+  setRole("viewer");
+  log("Abgemeldet.");
+  toast("Abgemeldet");
+  loadFiles();
+};
 
-setRole(currentRole);
-loadFiles();
+(async () => {
+  try { isAdmin = (await (await fetch("/api/me")).json()).admin === true; } catch {}
+  setRole(isAdmin ? "admin" : currentRole);
+  loadFiles();
+})();
 </script>
 </body>
 </html>
