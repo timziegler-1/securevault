@@ -84,7 +84,8 @@
   .ext.folder { background: var(--accent-soft); color: var(--accent); }
   tr.folder td.name span:last-child { font-weight: 600; cursor: pointer; }
   tr.folder td.name span:last-child:hover { text-decoration: underline; }
-  .crumbs { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; font-size: 14px; margin-top: 10px; }
+  .crumbs { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; font-size: 14px; }
+  #backBtn[hidden], #mkdirBtn[hidden] { display: none; }
   .crumbs a { color: var(--ink); text-decoration: none; padding: 2px 6px; border-radius: 6px; cursor: pointer; }
   .crumbs a:hover { background: var(--code); }
   .crumbs a.current { font-weight: 700; cursor: default; background: transparent; }
@@ -159,9 +160,14 @@
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
         <path d="M12 16V4"/><path d="m6 10 6-6 6 6"/><path d="M4 20h16"/>
       </svg>
-      <strong>Dateien hierher ziehen oder klicken</strong>
+      <strong>Dateien oder Ordner hierher ziehen oder klicken</strong>
       <small id="dropHint">Mehrere Dateien möglich, max. 50 MB pro Datei</small>
     </label>
+    <input type="file" id="folderInput" webkitdirectory multiple hidden>
+    <div class="row" style="margin-top:12px">
+      <button class="ghost" id="pickFiles">📄 Dateien auswählen</button>
+      <button class="ghost" id="pickFolder">📁 Ordner auswählen</button>
+    </div>
     <div id="queue"></div>
     <p class="hint">Der Server erzeugt pro Datei eine Upload-URL (gültig {{ expires }} s) und lädt sie damit in den Bucket. Mit dem Viewer-Key lehnt B2 den Upload ab.</p>
   </section>
@@ -174,7 +180,10 @@
         <button class="ghost" id="refreshBtn">Aktualisieren</button>
       </div>
     </div>
-    <nav class="crumbs" id="crumbs" aria-label="Ordnerpfad"></nav>
+    <div class="row" style="margin-top:10px">
+      <button class="ghost" id="backBtn" hidden>← Zurück</button>
+      <nav class="crumbs" id="crumbs" aria-label="Ordnerpfad"></nav>
+    </div>
     <form class="row" id="mkdirRow" hidden>
       <input class="search" id="mkdirName" placeholder="Name des neuen Ordners" maxlength="100" autocomplete="off">
       <button type="submit">Erstellen</button>
@@ -334,13 +343,7 @@ function render() {
 
   const tbody = $("files");
   tbody.innerHTML = "";
-  if (prefix) {
-    const up = prefix.slice(0, -1).split("/").slice(0, -1).join("/");
-    const tr = document.createElement("tr"); tr.className = "folder";
-    tr.innerHTML = '<td class="name"><div><span class="ext folder">↑</span><span>.. (eine Ebene höher)</span></div></td><td></td><td class="hide-sm"></td><td></td>';
-    tr.querySelector("span:last-child").onclick = () => openFolder(up ? up + "/" : "");
-    tbody.append(tr);
-  }
+  $("backBtn").hidden = !prefix;
   for (const d of dirs) {
     const tr = document.createElement("tr"); tr.className = "folder";
     const name = document.createElement("td"); name.className = "name";
@@ -415,11 +418,13 @@ function showLink(url, seconds, info) {
   timerId = setInterval(tick, 1000);
 }
 
-function uploadOne(file) {
+// rel = Pfad innerhalb eines hochgeladenen Ordners, z. B. "Fotos/2026/bild.jpg"
+function uploadOne(file, rel) {
+  const subdir = rel.includes("/") ? rel.slice(0, rel.lastIndexOf("/") + 1) : "";
   const item = document.createElement("div");
   item.className = "qitem";
   item.innerHTML = '<span class="name"></span><span class="state">wartet …</span><div class="bar"><i></i></div>';
-  item.querySelector(".name").textContent = file.name;
+  item.querySelector(".name").textContent = rel;
   $("queue").prepend(item);
   const state = item.querySelector(".state"), bar = item.querySelector(".bar");
 
@@ -427,6 +432,7 @@ function uploadOne(file) {
     const fd = new FormData();
     fd.append("role", role());
     fd.append("prefix", prefix);
+    fd.append("subdir", subdir);
     fd.append("file", file);
     const xhr = new XMLHttpRequest();
     xhr.open("POST", "/api/upload");
@@ -460,19 +466,46 @@ function uploadOne(file) {
   });
 }
 
+// list: File-Objekte oder {file, rel}; bei Ordnerauswahl liefert der Browser webkitRelativePath
 async function uploadFiles(list) {
-  if (!list.length) return;
+  const items = list.map(x => x instanceof File ? { file: x, rel: x.webkitRelativePath || x.name } : x);
+  if (!items.length) return;
   let ok = 0;
-  for (const f of list) {
-    if (f.size > 50 * 1024 * 1024) {
-      log(`„${f.name}“ ist grösser als 50 MB und wurde übersprungen.`, "err");
+  for (const { file, rel } of items) {
+    if (file.size > 50 * 1024 * 1024) {
+      log(`„${rel}“ ist grösser als 50 MB und wurde übersprungen.`, "err");
       continue;
     }
-    if (await uploadOne(f)) ok++;
+    if (await uploadOne(file, rel)) ok++;
   }
-  toast(`${ok} von ${list.length} Datei(en) hochgeladen`, ok === list.length ? "ok" : "err");
+  toast(`${ok} von ${items.length} Datei(en) hochgeladen`, ok === items.length ? "ok" : "err");
   $("file").value = "";
+  $("folderInput").value = "";
   loadFiles();
+}
+
+// Gezogene Ordner rekursiv durchgehen (Drag & Drop liefert Verzeichnis-Eintraege)
+async function collectEntry(entry, path, out) {
+  if (entry.isFile) {
+    const file = await new Promise((res, rej) => entry.file(res, rej));
+    out.push({ file, rel: path + file.name });
+  } else if (entry.isDirectory) {
+    const reader = entry.createReader();
+    let batch;
+    do {
+      batch = await new Promise((res, rej) => reader.readEntries(res, rej));
+      for (const e of batch) await collectEntry(e, path + entry.name + "/", out);
+    } while (batch.length);
+  }
+}
+
+async function handleDrop(e) {
+  const entries = [...(e.dataTransfer.items || [])]
+    .map(i => i.webkitGetAsEntry && i.webkitGetAsEntry()).filter(Boolean);
+  if (!entries.length) return uploadFiles([...e.dataTransfer.files]);
+  const out = [];
+  for (const en of entries) await collectEntry(en, "", out);
+  uploadFiles(out);
 }
 
 async function getUrl(key) {
@@ -575,8 +608,15 @@ $("mkdirRow").onsubmit = (e) => {
 const drop = $("drop");
 ["dragenter", "dragover"].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.add("over"); }));
 ["dragleave", "drop"].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.remove("over"); }));
-drop.addEventListener("drop", e => uploadFiles([...e.dataTransfer.files]));
+drop.addEventListener("drop", handleDrop);
 $("file").onchange = () => uploadFiles([...$("file").files]);
+$("folderInput").onchange = () => uploadFiles([...$("folderInput").files]);
+$("pickFiles").onclick = () => $("file").click();
+$("pickFolder").onclick = () => $("folderInput").click();
+$("backBtn").onclick = () => {
+  const up = prefix.slice(0, -1).split("/").slice(0, -1).join("/");
+  openFolder(up ? up + "/" : "");
+};
 
 document.querySelectorAll("th[data-sort]").forEach(th => th.onclick = () => {
   const k = th.dataset.sort;
