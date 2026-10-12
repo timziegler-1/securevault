@@ -1,0 +1,232 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SecureVault</title>
+<style>
+  :root {
+    --bg: #F4F6F9; --card: #FFFFFF; --ink: #14213D; --muted: #5A6475;
+    --line: #DDE2EA; --accent: #C8102E; --ok: #1E7A34; --okbg: #E8F5EC;
+    --err: #B42318; --errbg: #FDECEA; --code: #EEF1F5;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+         font: 15px/1.5 "Segoe UI", system-ui, Arial, sans-serif; }
+  header { background: var(--ink); color: #fff; padding: 18px 24px;
+           display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+  header h1 { margin: 0; font-size: 22px; letter-spacing: .3px; }
+  header h1 span { color: #F4A3B0; font-weight: 400; font-size: 15px; margin-left: 8px; }
+  .role { display: flex; align-items: center; gap: 10px; }
+  .role select { font: inherit; padding: 6px 10px; border-radius: 6px; border: 0; }
+  .badge { padding: 3px 10px; border-radius: 999px; font-size: 13px; font-weight: 600; }
+  .badge.admin { background: #F4A3B0; color: #5B0715; }
+  .badge.viewer { background: #A9D3F5; color: #0B3558; }
+  .badge.standard { background: #ddd; color: #333; }
+  main { max-width: 980px; margin: 24px auto; padding: 0 16px; display: grid; gap: 20px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 18px 20px; }
+  .card h2 { margin: 0 0 12px; font-size: 17px; }
+  .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  button { font: inherit; cursor: pointer; border-radius: 6px; padding: 7px 14px;
+           border: 1px solid var(--ink); background: var(--ink); color: #fff; }
+  button.ghost { background: #fff; color: var(--ink); }
+  button.danger { background: #fff; color: var(--err); border-color: var(--err); }
+  button:disabled { opacity: .5; cursor: default; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { text-align: left; padding: 8px 6px; border-bottom: 1px solid var(--line); }
+  th { color: var(--muted); font-weight: 600; font-size: 13px; }
+  td.actions { text-align: right; white-space: nowrap; }
+  td.actions button { padding: 4px 10px; font-size: 13px; margin-left: 4px; }
+  .empty { color: var(--muted); padding: 10px 0; }
+  .url { background: var(--code); border-radius: 6px; padding: 8px 10px; font: 12px Consolas, monospace;
+         word-break: break-all; max-height: 74px; overflow: auto; margin: 8px 0; }
+  .timer { font-weight: 700; }
+  .timer.expired { color: var(--err); }
+  #log { display: grid; gap: 6px; }
+  .entry { border-radius: 6px; padding: 8px 12px; font-size: 14px; }
+  .entry.ok { background: var(--okbg); color: var(--ok); }
+  .entry.err { background: var(--errbg); color: var(--err); }
+  .entry.info { background: var(--code); color: var(--ink); }
+  .entry time { color: var(--muted); font-size: 12px; margin-right: 8px; }
+  .hint { color: var(--muted); font-size: 13px; margin: 6px 0 0; }
+  @media (max-width: 600px) { td.actions button { display: block; margin: 4px 0 0 auto; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>SecureVault <span>Sicherer Filehosting-Service mit Backblaze B2</span></h1>
+  <div class="role">
+    <label for="role">Rolle:</label>
+    <select id="role">
+      {% for r in roles %}<option value="{{ r }}">{{ r|capitalize }}</option>{% endfor %}
+    </select>
+    <span id="roleBadge" class="badge"></span>
+  </div>
+</header>
+
+<main>
+  <section class="card">
+    <h2>Datei hochladen</h2>
+    <div class="row">
+      <input type="file" id="file">
+      <button id="uploadBtn">Hochladen</button>
+    </div>
+    <p class="hint">Der Server erzeugt eine Upload-URL (gültig {{ expires }} s) und lädt die Datei damit in den Bucket. Mit dem Viewer-Key lehnt B2 den Upload ab.</p>
+  </section>
+
+  <section class="card">
+    <div class="row" style="justify-content: space-between">
+      <h2 style="margin:0">Dateien im Bucket <span id="bucket" style="color:var(--muted);font-weight:400"></span></h2>
+      <button class="ghost" id="refreshBtn">Aktualisieren</button>
+    </div>
+    <table>
+      <thead><tr><th>Datei</th><th>Grösse</th><th>Hochgeladen</th><th></th></tr></thead>
+      <tbody id="files"></tbody>
+    </table>
+  </section>
+
+  <section class="card" id="linkCard" hidden>
+    <h2>Letzte Presigned URL</h2>
+    <div><span id="linkInfo"></span> · noch <span class="timer" id="timer"></span></div>
+    <div class="url" id="linkUrl"></div>
+    <div class="row">
+      <button class="ghost" id="openLink">Link öffnen</button>
+      <button class="ghost" id="copyLink">Link kopieren</button>
+    </div>
+    <p class="hint">Nach Ablauf der Zeit lehnt B2 denselben Link ab.</p>
+  </section>
+
+  <section class="card">
+    <h2>Protokoll</h2>
+    <div id="log"><div class="entry info">Bereit.</div></div>
+  </section>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const roleSel = $("role");
+let lastUrl = null, expiresAt = 0, timerId = null;
+
+function role() { return roleSel.value; }
+
+function log(text, kind = "info") {
+  const e = document.createElement("div");
+  e.className = "entry " + kind;
+  const t = document.createElement("time");
+  t.textContent = new Date().toLocaleTimeString("de-CH");
+  e.append(t, text);
+  $("log").prepend(e);
+}
+
+function showRole() {
+  const b = $("roleBadge");
+  b.className = "badge " + role();
+  b.textContent = role() === "admin" ? "Lesen + Schreiben" : role() === "viewer" ? "Nur Lesen" : "aus .env";
+}
+
+function fmtSize(n) {
+  if (n < 1024) return n + " B";
+  if (n < 1048576) return (n / 1024).toFixed(1) + " KB";
+  return (n / 1048576).toFixed(1) + " MB";
+}
+
+async function loadFiles() {
+  const tbody = $("files");
+  tbody.innerHTML = "";
+  const r = await fetch("/api/files?role=" + encodeURIComponent(role()));
+  const data = await r.json();
+  if (!r.ok) { log("Dateiliste nicht lesbar: " + data.error, "err"); return; }
+  $("bucket").textContent = "(" + data.bucket + ")";
+  if (!data.files.length) {
+    tbody.innerHTML = '<tr><td colspan="4" class="empty">Der Bucket ist leer.</td></tr>';
+    return;
+  }
+  for (const f of data.files) {
+    const tr = document.createElement("tr");
+    const name = document.createElement("td"); name.textContent = f.key;
+    const size = document.createElement("td"); size.textContent = fmtSize(f.size);
+    const mod = document.createElement("td"); mod.textContent = new Date(f.modified).toLocaleString("de-CH");
+    const act = document.createElement("td"); act.className = "actions";
+    const dl = document.createElement("button"); dl.className = "ghost"; dl.textContent = "Download";
+    dl.onclick = () => download(f.key);
+    const del = document.createElement("button"); del.className = "danger"; del.textContent = "Löschen";
+    del.onclick = () => remove(f.key);
+    act.append(dl, del);
+    tr.append(name, size, mod, act);
+    tbody.append(tr);
+  }
+}
+
+function showLink(url, seconds, info) {
+  lastUrl = url;
+  expiresAt = Date.now() + seconds * 1000;
+  $("linkCard").hidden = false;
+  $("linkInfo").textContent = info;
+  $("linkUrl").textContent = url;
+  clearInterval(timerId);
+  const tick = () => {
+    const left = Math.max(0, Math.round((expiresAt - Date.now()) / 1000));
+    $("timer").textContent = left ? left + " s gültig" : "abgelaufen";
+    $("timer").classList.toggle("expired", !left);
+    if (!left) clearInterval(timerId);
+  };
+  tick();
+  timerId = setInterval(tick, 1000);
+}
+
+async function upload() {
+  const file = $("file").files[0];
+  if (!file) { log("Bitte zuerst eine Datei auswählen.", "err"); return; }
+  const fd = new FormData();
+  fd.append("role", role());
+  fd.append("file", file);
+  $("uploadBtn").disabled = true;
+  try {
+    const r = await fetch("/api/upload", { method: "POST", body: fd });
+    const d = await r.json();
+    if (d.url) showLink(d.url, d.expires || 300, "Upload-URL für " + d.key);
+    if (d.ok) {
+      log(`Upload von „${d.key}“ erfolgreich (HTTP ${d.status}) als ${role()}.`, "ok");
+      loadFiles();
+    } else {
+      log(`Upload von „${d.key || file.name}“ abgelehnt (HTTP ${d.status || r.status}): ${d.code || ""} ${d.message || d.error || ""}`, "err");
+    }
+  } finally {
+    $("uploadBtn").disabled = false;
+  }
+}
+
+async function download(key) {
+  const r = await fetch(`/api/download-url?role=${encodeURIComponent(role())}&key=${encodeURIComponent(key)}`);
+  const d = await r.json();
+  if (!r.ok) { log("Download-URL fehlgeschlagen: " + d.error, "err"); return; }
+  showLink(d.url, d.expires, "Download-URL für " + key);
+  window.open(d.url, "_blank");
+  log(`Download-URL für „${key}“ erzeugt und geöffnet (${role()}).`, "ok");
+}
+
+async function remove(key) {
+  if (!confirm(`„${key}“ wirklich löschen?`)) return;
+  const fd = new FormData();
+  fd.append("role", role());
+  fd.append("key", key);
+  const r = await fetch("/api/delete", { method: "POST", body: fd });
+  const d = await r.json();
+  if (d.ok) { log(`„${key}“ gelöscht (${role()}).`, "ok"); loadFiles(); }
+  else log(`Löschen von „${key}“ abgelehnt (HTTP ${d.status || r.status}): ${d.code || ""} ${d.message || d.error || ""}`, "err");
+}
+
+$("uploadBtn").onclick = upload;
+$("refreshBtn").onclick = loadFiles;
+$("openLink").onclick = () => lastUrl && window.open(lastUrl, "_blank");
+$("copyLink").onclick = async () => {
+  try { await navigator.clipboard.writeText(lastUrl); log("Link kopiert."); }
+  catch { log("Kopieren nicht möglich, bitte von Hand markieren.", "err"); }
+};
+roleSel.onchange = () => { showRole(); log("Rolle gewechselt zu " + role() + "."); loadFiles(); };
+
+showRole();
+loadFiles();
+</script>
+</body>
+</html>
