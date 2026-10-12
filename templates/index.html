@@ -90,6 +90,17 @@
   .crumbs a:hover { background: var(--code); }
   .crumbs a.current { font-weight: 700; cursor: default; background: transparent; }
   .crumbs .sep { color: var(--muted); }
+  dialog { background: var(--card); color: var(--ink); border: 1px solid var(--line); border-radius: 14px;
+           padding: 20px; width: min(480px, calc(100vw - 32px)); box-shadow: var(--shadow); }
+  dialog::backdrop { background: rgba(0,0,0,.55); }
+  dialog h2 { margin: 0 0 4px; font-size: 18px; }
+  .folderlist { margin-top: 12px; max-height: 300px; overflow: auto; border: 1px solid var(--line);
+                border-radius: 10px; padding: 4px; }
+  .folderlist label { display: flex; align-items: center; gap: 8px; padding: 7px 10px; border-radius: 8px;
+                      cursor: pointer; word-break: break-all; }
+  .folderlist label:hover { background: var(--code); }
+  .folderlist label.sel { background: var(--accent-soft); color: var(--ink); font-weight: 600; }
+  .folderlist input { accent-color: var(--accent); margin: 0; }
   #mkdirRow { margin-top: 12px; }
   #mkdirRow[hidden] { display: none; }
   td.actions { text-align: right; white-space: nowrap; }
@@ -160,14 +171,9 @@
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
         <path d="M12 16V4"/><path d="m6 10 6-6 6 6"/><path d="M4 20h16"/>
       </svg>
-      <strong>Dateien oder Ordner hierher ziehen oder klicken</strong>
+      <strong>Dateien hierher ziehen oder klicken</strong>
       <small id="dropHint">Mehrere Dateien möglich, max. 50 MB pro Datei</small>
     </label>
-    <input type="file" id="folderInput" webkitdirectory multiple hidden>
-    <div class="row" style="margin-top:12px">
-      <button class="ghost" id="pickFiles">📄 Dateien auswählen</button>
-      <button class="ghost" id="pickFolder">📁 Ordner auswählen</button>
-    </div>
     <div id="queue"></div>
     <p class="hint">Der Server erzeugt pro Datei eine Upload-URL (gültig {{ expires }} s) und lädt sie damit in den Bucket. Mit dem Viewer-Key lehnt B2 den Upload ab.</p>
   </section>
@@ -225,6 +231,21 @@
 </main>
 
 <div id="toast"></div>
+
+<dialog id="targetDlg">
+  <form method="dialog" id="targetForm">
+    <h2>In welchen Ordner hochladen?</h2>
+    <p class="hint" id="targetFiles"></p>
+    <div class="folderlist" id="targetList" role="radiogroup" aria-label="Zielordner"></div>
+    <div class="row spread" style="margin-top:16px">
+      <span class="hint" id="targetPath"></span>
+      <div class="row">
+        <button type="button" class="ghost" id="targetCancel">Abbrechen</button>
+        <button type="submit" id="targetOk">Hochladen</button>
+      </div>
+    </div>
+  </form>
+</dialog>
 
 <script>
 const $ = (id) => document.getElementById(id);
@@ -418,21 +439,19 @@ function showLink(url, seconds, info) {
   timerId = setInterval(tick, 1000);
 }
 
-// rel = Pfad innerhalb eines hochgeladenen Ordners, z. B. "Fotos/2026/bild.jpg"
-function uploadOne(file, rel) {
-  const subdir = rel.includes("/") ? rel.slice(0, rel.lastIndexOf("/") + 1) : "";
+// target = Zielordner im Bucket, z. B. "Dokumente/2026/" ("" = oberste Ebene)
+function uploadOne(file, target) {
   const item = document.createElement("div");
   item.className = "qitem";
   item.innerHTML = '<span class="name"></span><span class="state">wartet …</span><div class="bar"><i></i></div>';
-  item.querySelector(".name").textContent = rel;
+  item.querySelector(".name").textContent = "/" + target + file.name;
   $("queue").prepend(item);
   const state = item.querySelector(".state"), bar = item.querySelector(".bar");
 
   return new Promise((resolve) => {
     const fd = new FormData();
     fd.append("role", role());
-    fd.append("prefix", prefix);
-    fd.append("subdir", subdir);
+    fd.append("prefix", target);
     fd.append("file", file);
     const xhr = new XMLHttpRequest();
     xhr.open("POST", "/api/upload");
@@ -466,46 +485,74 @@ function uploadOne(file, rel) {
   });
 }
 
-// list: File-Objekte oder {file, rel}; bei Ordnerauswahl liefert der Browser webkitRelativePath
+// Fragt nach dem Zielordner im Bucket; liefert den Ordner oder null bei Abbruch
+async function askTarget(list) {
+  const dlg = $("targetDlg"), box = $("targetList");
+  $("targetFiles").textContent = list.length === 1
+    ? `Datei: ${list[0].name}`
+    : `${list.length} Dateien: ${list.slice(0, 3).map(f => f.name).join(", ")}${list.length > 3 ? " …" : ""}`;
+  box.innerHTML = '<div class="hint" style="padding:8px">Ordner werden geladen …</div>';
+  dlg.showModal();
+
+  let all = [];
+  try {
+    const r = await fetch("/api/folders?role=" + encodeURIComponent(role()));
+    const d = await r.json();
+    all = d.folders || [];
+  } catch {}
+  if (prefix && !all.includes(prefix)) all.push(prefix);
+  const choices = [""].concat(all);
+
+  box.innerHTML = "";
+  const select = (p) => {
+    box.querySelectorAll("label").forEach(l => l.classList.toggle("sel", l.dataset.p === p));
+    $("targetPath").textContent = "Ziel: /" + p;
+  };
+  for (const p of choices) {
+    const depth = p ? p.split("/").length - 2 : 0;
+    const label = document.createElement("label");
+    label.dataset.p = p;
+    label.style.paddingLeft = (10 + depth * 18) + "px";
+    const radio = document.createElement("input");
+    radio.type = "radio"; radio.name = "target"; radio.value = p;
+    radio.checked = p === prefix;
+    radio.onchange = () => select(p);
+    const text = document.createElement("span");
+    text.textContent = p ? "📁 " + p.slice(0, -1).split("/").pop() : "🗄 Oberste Ebene (" + (bucketName || "Bucket") + ")";
+    label.append(radio, text);
+    label.ondblclick = () => { radio.checked = true; select(p); $("targetForm").requestSubmit(); };
+    box.append(label);
+  }
+  select(prefix);
+  box.querySelector("input:checked")?.focus();
+
+  return new Promise((resolve) => {
+    $("targetForm").onsubmit = (e) => {
+      e.preventDefault();
+      resolve(box.querySelector("input:checked")?.value ?? prefix);
+      dlg.close();
+    };
+    $("targetCancel").onclick = () => dlg.close();
+    dlg.onclose = () => resolve(null);  // greift nur, wenn vorher nicht schon aufgeloest
+  });
+}
+
 async function uploadFiles(list) {
-  const items = list.map(x => x instanceof File ? { file: x, rel: x.webkitRelativePath || x.name } : x);
-  if (!items.length) return;
+  $("file").value = "";
+  if (!list.length) return;
+  const target = await askTarget(list);
+  if (target === null) { log("Upload abgebrochen."); return; }
   let ok = 0;
-  for (const { file, rel } of items) {
-    if (file.size > 50 * 1024 * 1024) {
-      log(`„${rel}“ ist grösser als 50 MB und wurde übersprungen.`, "err");
+  for (const f of list) {
+    if (f.size > 50 * 1024 * 1024) {
+      log(`„${f.name}“ ist grösser als 50 MB und wurde übersprungen.`, "err");
       continue;
     }
-    if (await uploadOne(file, rel)) ok++;
+    if (await uploadOne(f, target)) ok++;
   }
-  toast(`${ok} von ${items.length} Datei(en) hochgeladen`, ok === items.length ? "ok" : "err");
-  $("file").value = "";
-  $("folderInput").value = "";
-  loadFiles();
-}
-
-// Gezogene Ordner rekursiv durchgehen (Drag & Drop liefert Verzeichnis-Eintraege)
-async function collectEntry(entry, path, out) {
-  if (entry.isFile) {
-    const file = await new Promise((res, rej) => entry.file(res, rej));
-    out.push({ file, rel: path + file.name });
-  } else if (entry.isDirectory) {
-    const reader = entry.createReader();
-    let batch;
-    do {
-      batch = await new Promise((res, rej) => reader.readEntries(res, rej));
-      for (const e of batch) await collectEntry(e, path + entry.name + "/", out);
-    } while (batch.length);
-  }
-}
-
-async function handleDrop(e) {
-  const entries = [...(e.dataTransfer.items || [])]
-    .map(i => i.webkitGetAsEntry && i.webkitGetAsEntry()).filter(Boolean);
-  if (!entries.length) return uploadFiles([...e.dataTransfer.files]);
-  const out = [];
-  for (const en of entries) await collectEntry(en, "", out);
-  uploadFiles(out);
+  toast(`${ok} von ${list.length} Datei(en) nach /${target} hochgeladen`, ok === list.length ? "ok" : "err");
+  if (ok && target !== prefix) openFolder(target);  // Zielordner anzeigen
+  else loadFiles();
 }
 
 async function getUrl(key) {
@@ -608,11 +655,8 @@ $("mkdirRow").onsubmit = (e) => {
 const drop = $("drop");
 ["dragenter", "dragover"].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.add("over"); }));
 ["dragleave", "drop"].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.remove("over"); }));
-drop.addEventListener("drop", handleDrop);
+drop.addEventListener("drop", e => uploadFiles([...e.dataTransfer.files]));
 $("file").onchange = () => uploadFiles([...$("file").files]);
-$("folderInput").onchange = () => uploadFiles([...$("folderInput").files]);
-$("pickFiles").onclick = () => $("file").click();
-$("pickFolder").onclick = () => $("folderInput").click();
 $("backBtn").onclick = () => {
   const up = prefix.slice(0, -1).split("/").slice(0, -1).join("/");
   openFolder(up ? up + "/" : "");

@@ -140,6 +140,25 @@ def list_files():
     return jsonify(bucket=bucket, prefix=prefix, folders=folders, files=files)
 
 
+@app.route("/api/folders")
+def all_folders():
+    """Alle Ordner im Bucket (fuer die Zielauswahl beim Upload)."""
+    role = get_role()
+    if not role:
+        return jsonify(error="Unbekannte Rolle"), 400
+    s3, bucket = client_for(role)
+    found = set()
+    try:
+        for page in s3.get_paginator("list_objects_v2").paginate(Bucket=bucket):
+            for o in page.get("Contents", []):
+                parts = o["Key"].split("/")[:-1]  # letzter Teil ist der Dateiname
+                for i in range(1, len(parts) + 1):
+                    found.add("/".join(parts[:i]) + "/")
+    except Exception as e:
+        return jsonify(error=str(e)), 403
+    return jsonify(folders=sorted(found, key=str.lower))
+
+
 @app.route("/api/upload", methods=["POST"])
 def upload():
     role = get_role()
@@ -148,12 +167,10 @@ def upload():
         return jsonify(error="Rolle oder Datei fehlt"), 400
     try:
         prefix = clean_prefix(request.values.get("prefix"))
-        # Bei Ordner-Uploads: Unterordner innerhalb des gewaehlten Ordners, z. B. "Fotos/2026/"
-        subdir = clean_prefix(request.values.get("subdir"))
     except ValueError as e:
         return jsonify(error=str(e)), 400
     s3, bucket = client_for(role)
-    key = prefix + subdir + os.path.basename(f.filename)
+    key = prefix + os.path.basename(f.filename)
     result = presigned_put(s3, bucket, key, f.read(), f.mimetype or "application/octet-stream")
     return jsonify(**result)
 
