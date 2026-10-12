@@ -308,8 +308,7 @@ function render() {
     cp.onclick = () => shareLink(f.key);
     const del = document.createElement("button"); del.className = "danger"; del.textContent = "Löschen";
     del.onclick = () => remove(f.key);
-    act.append(dl, cp);
-    if (role() !== "viewer") act.append(del);  // Viewer hat keine Loeschrechte
+    act.append(dl, cp, del);
     tr.append(name, size, mod, act);
     tbody.append(tr);
   }
